@@ -86,9 +86,9 @@ def intermediate_scattering(F_type, num_k_bins, max_time_origins, d_frames, part
     num_k_bins: number of k points. Computation time is proportional to this squared
     max_time_origins: averages will be taken over this many different time origins. Computation time is directly proportional to this
     d_frames: an array of values of delta (frame number) that will be calculated (s.t. delta t is this multiplied by the timestep)
-    particles: list of rows of (x, y, t) or (x, y, t, #)
+    particles_at_frame: list of lists of (x, y) for each timesep
     max_K:
-    min_K:
+    min_K: 2d list/tuple/ndarray as (min_K_x, min_K_y)
     """
     assert not np.isnan(max_K)
     assert 0 in d_frames, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
@@ -243,29 +243,32 @@ def get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, log_cal
     sym = False
 
     if True:
-        k_small = np.arange(min_K, linear_log_crossover_k, min_K, dtype='float64') # why are we using f64?
+        k_small_x = np.arange(min_K[0], linear_log_crossover_k, min_K, dtype='float64') # why are we using f64?
+        k_small_y = np.arange(min_K[1], linear_log_crossover_k, min_K, dtype='float64') # why are we using f64?
         k_big = np.logspace(np.log10(linear_log_crossover_k), np.log10(max_K), num_k_bins, dtype='float64')
         # k_x_pos =  np.logspace(np.log10(min_K), np.log10(max_K), num_k_bins, dtype='float64')
         if use_big_k:
-            k_oneside = np.concatenate([k_small, k_big])
+            k_oneside_x = np.concatenate([k_small_x, k_big])
+            k_oneside_y = np.concatenate([k_small_y, k_big])
         else:
-            k_oneside = k_small
+            k_oneside_x = k_small_x
+            k_oneside_y = k_small_y
 
         if use_zero:
-            k_x = np.concatenate([-k_oneside[::-1], (0,), k_oneside])
+            k_x = np.concatenate([-k_oneside_x[::-1], (0,), k_oneside_x])
         else:
-            k_x = np.concatenate([-k_oneside[::-1], k_oneside])
+            k_x = np.concatenate([-k_oneside_x[::-1], k_oneside_x])
 
         if use_doublesided_k:
             if use_zero:
-                k_y = np.concatenate([-k_oneside[::-1], (0,), k_oneside])
+                k_y = np.concatenate([-k_oneside_y[::-1], (0,), k_oneside_y])
             else:
-                k_y = np.concatenate([-k_oneside[::-1], k_oneside])
+                k_y = np.concatenate([-k_oneside_y[::-1], k_oneside_y])
         else:
-            k_y = np.concatenate([(0,), k_oneside])
+            k_y = np.concatenate([(0,), k_oneside_y])
 
         # bin_edges = np.concatenate([(0,), np.logspace(np.log10(min_K), np.log10(max_K), num_k_bins)])
-        bin_edges = np.concatenate([(0,), k_oneside])
+        bin_edges = np.concatenate([(0,), k_oneside_x])
 
     elif log_calc:
         k_x_pos =  np.logspace(np.log10(min_K), np.log10(max_K), num_k_bins, dtype='float64')
