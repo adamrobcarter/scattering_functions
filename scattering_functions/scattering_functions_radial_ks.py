@@ -1,10 +1,8 @@
 import numpy as np
-import scipy.stats
 import multiprocessing
 import functools
-import common
 import tqdm
-import warnings, time
+import warnings
 
 def get_particles_at_frame(particles):
     num_timesteps = int(particles[:, 2].max()) + 1
