@@ -61,6 +61,8 @@ def get_particles_at_frame(F_type, particles):
             # if i > 10:
             #     break
 
+        progress.close()
+
         # import sys
         # sys.exit()
         print('good trajs', len(good_ids)/particles[:, 3].max())
@@ -84,30 +86,11 @@ def get_particles_at_frame(F_type, particles):
             # if i > 10:
             #     break
 
-        import sys
-        sys.exit()
-
-
-        # make sure IDs are 0-based
-        particles[:, 3] -= particles[:, 3].min()
-
         num_particles = int(particles[:, 3].max()) + 1
         assert num_particles > 0
 
-        # particles_at_frame = [np.full((num_particles, 2), np.nan) for _ in range(num_timesteps)]
-        particles_at_frame = [np.full((num_particles, 4), np.nan) for _ in range(num_timesteps)]
-
-
-
-        for i in tqdm.trange(len(particles)):
-            t = int(particles[i, 2])
-            old_id = int(particles[i, 3])
-            particles_at_frame[t][old_id, :] = particles[i, :]
-
-        for t in tqdm.trange(num_timesteps):
-            assert np.isnan(particles_at_frame[t]).sum() < particles_at_frame[t].size, f'particles_at_frame[{t}] was all nan'
-
         del particles
+
     else:
         # for F (not self), we don't need the ID, so we just provide a list of particles
         # some datasets may already have the ID in column 4, so we only select the first 3 columns
@@ -161,6 +144,7 @@ def intermediate_scattering(F_type, num_k_bins, max_time_origins, d_frames, part
     """
     assert not np.isnan(max_K)
     assert 0 in d_frames, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
+    d_frames = np.array(d_frames) # (possible) list to ndarray
 
     k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_zero=use_zero, use_big_k=use_big_k, linear_log_crossover_k=linear_log_crossover_k, use_doublesided_k=use_doublesided_k)
     
@@ -180,7 +164,7 @@ def intermediate_scattering(F_type, num_k_bins, max_time_origins, d_frames, part
     print('finding particles at each timestep')
 
 
-    assert np.all(d_frames < num_timesteps)
+    assert np.all(d_frames <= num_timesteps)
 
     use_every_nth_frame = max(int(num_timesteps / max_time_origins), 1)
     
@@ -223,6 +207,7 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, use_every_nth_frame, d_
     assert num_frames > d_frame, f'd_frame={d_frame}, num_frames={num_frames}'
 
     time_origins_to_use = range(0, num_frames-d_frame-1, use_every_nth_frame)
+    assert len(time_origins_to_use) > 0
 
     assert max(time_origins_to_use) + d_frame < num_frames
     
@@ -483,40 +468,42 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
 
 #     return k, contrib
 
-# def self_intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
-#     # remove particles that were nan in both sets
-#     nans = np.isnan(particles_t0[:, 0]) | np.isnan(particles_t1[:, 0])
+def self_intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
+    # remove particles that were nan in both sets
+    nans = np.isnan(particles_t0[:, 0]) | np.isnan(particles_t1[:, 0])
+
+    print(nans.shape, particles_t0.shape, particles_t1.shape)
     
-#     particles_t0 = particles_t0[~nans, :]
-#     particles_t1 = particles_t1[~nans, :]
+    particles_t0 = particles_t0[~nans, :]
+    particles_t1 = particles_t1[~nans, :]
     
-#     num_particles = particles_t0.shape[0]
-#     #print(f"kept {num_particles} of {num_particles_before}")
+    num_particles = particles_t0.shape[0]
+    #print(f"kept {num_particles} of {num_particles_before}")
     
-#     particle_t0_x = particles_t0[:, 0]
-#     particle_t0_y = particles_t0[:, 1]
-#     particle_t1_x = particles_t1[:, 0]
-#     particle_t1_y = particles_t1[:, 1]
+    particle_t0_x = particles_t0[:, 0]
+    particle_t0_y = particles_t0[:, 1]
+    particle_t1_x = particles_t1[:, 0]
+    particle_t1_y = particles_t1[:, 1]
 
-#     # dimensions are
-#     # mu x kx x ky
-#     x_mu = particle_t0_x[:, np.newaxis, np.newaxis]
-#     y_mu = particle_t0_y[:, np.newaxis, np.newaxis]
-#     x_nu = particle_t1_x[:, np.newaxis, np.newaxis]
-#     y_nu = particle_t1_y[:, np.newaxis, np.newaxis]
+    # dimensions are
+    # mu x kx x ky
+    x_mu = particle_t0_x[:, np.newaxis, np.newaxis]
+    y_mu = particle_t0_y[:, np.newaxis, np.newaxis]
+    x_nu = particle_t1_x[:, np.newaxis, np.newaxis]
+    y_nu = particle_t1_y[:, np.newaxis, np.newaxis]
 
-#     k_x = k_x[np.newaxis, :, np.newaxis]
-#     k_y = k_y[np.newaxis, np.newaxis, :]
+    k_x = k_x[np.newaxis, :, np.newaxis]
+    k_y = k_y[np.newaxis, np.newaxis, :]
 
-#     # k_dot_dr = k_x * (x_mu - x_nu)  +  k_y * (y_mu - y_nu)
-#     k_dot_dr = np.multiply(k_x, x_mu - x_nu, dtype='float64') + np.multiply(k_y, y_mu - y_nu, dtype='float64')
+    # k_dot_dr = k_x * (x_mu - x_nu)  +  k_y * (y_mu - y_nu)
+    k_dot_dr = np.multiply(k_x, x_mu - x_nu, dtype='float32') + np.multiply(k_y, y_mu - y_nu, dtype='float32') # this used to be float64 idk why
 
-#     S = 1/num_particles * np.cos(k_dot_dr).sum(axis=(0))
+    S = 1/num_particles * np.cos(k_dot_dr).sum(axis=(0))
 
-#     del k_dot_dr
-#     #neg = np.sum(contrib < 0)
-#     #print(f'{neg/contrib.size:.2f} negative')
+    del k_dot_dr
+    #neg = np.sum(contrib < 0)
+    #print(f'{neg/contrib.size:.2f} negative')
 
-#     k = np.sqrt(k_x**2 + k_y**2)
+    k = np.sqrt(k_x**2 + k_y**2)
 
-#     return k, S
+    return k, S
