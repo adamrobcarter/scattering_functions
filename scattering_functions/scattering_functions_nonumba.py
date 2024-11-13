@@ -180,23 +180,25 @@ def intermediate_scattering(F_type, num_k_bins, max_time_origins, d_frames, part
     if cores > 16:
         warnings.warn(f'using {cores} cores')
 
-    parallel = False
+    if cores > 1:
+        pool = multiprocessing.Pool(cores)
+    else:
+        pool = None
+        
+    for dframe_i in range(len(d_frames)):
+        F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(dframe_i, F_type=F_type,
+                            use_every_nth_frame=use_every_nth_frame, d_frames=d_frames, particles_at_frame=particles_at_frame,
+                            num_frames=num_timesteps, k_x=k_x, k_y=k_y, k_bins=k_bins, pool=pool, progress=progress)
+        
+        Fs   [dframe_i, :] = F_
+        F_unc[dframe_i, :] = F_unc_
+        ks   [dframe_i, :] = k_
+        Fs_full    [dframe_i, :, :] = F_unbinned
+        F_uncs_full[dframe_i, :, :] = F_unc_unbinned
+        ks_full    [dframe_i, :, :] = k_unbinned
 
-    with multiprocessing.Pool(cores) as pool:
-    # if True:
-        # pool = None
-        # for dframe_i in tqdm.trange(len(d_frames)):
-        for dframe_i in range(len(d_frames)):
-            F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(dframe_i, F_type=F_type,
-                                use_every_nth_frame=use_every_nth_frame, d_frames=d_frames, particles_at_frame=particles_at_frame,
-                                num_frames=num_timesteps, k_x=k_x, k_y=k_y, k_bins=k_bins, pool=pool, progress=progress)
-            
-            Fs   [dframe_i, :] = F_
-            F_unc[dframe_i, :] = F_unc_
-            ks   [dframe_i, :] = k_
-            Fs_full    [dframe_i, :, :] = F_unbinned
-            F_uncs_full[dframe_i, :, :] = F_unc_unbinned
-            ks_full    [dframe_i, :, :] = k_unbinned
+    if cores > 1:
+        pool.close()
 
 
     return Fs, F_unc, ks, Fs_full, F_uncs_full, ks_full, k_x, k_y
@@ -224,7 +226,6 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, use_every_nth_frame, d_
     else:
         func = intermediate_scattering_internal
 
-    parallel = True
     
     bound = functools.partial(intermediate_scattering_preprocess_run_postprocess,
                                 k_x, k_y, k_bins, func)
@@ -240,7 +241,7 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, use_every_nth_frame, d_
     # results = pool.map(bound, particles, chunksize=1)
     # progress.update(len(results))
 
-    if parallel:
+    if pool:
         results = []
         tasks = pool.imap(bound, particles, chunksize=1)
         for result in tasks:
