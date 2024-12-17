@@ -2,7 +2,7 @@ import numpy as np
 import scattering_functions
 
 particles = np.array([
-#    x  y  t
+#    x    y    t
     [0.0, 0.0, 0],
     [1.0, 1.0, 0],
     [1.0, 1.0, 1],
@@ -22,7 +22,8 @@ Fs, F_unc, ks, F_unbinned, F_unc_unbinned, k_unbinned, k_x, k_y = scattering_fun
     particles_at_frame=particles_at_frame,
     num_timesteps=num_timesteps,
     max_K=10,
-    min_K=(0.1, 0.1), # (x, y)
+    min_K=(0.1, 0.1), # (x, y). This sets the spacing of the k-grid (for k < linear_log_crossover_k).
+                      # This should probably be (2pi/Lx, 2pi/Ly) where (Lx, Ly) is the size of the domain
     cores=16, # uses multiprocessing, set to 1 to turn of parallel excecution
     use_zero=True,
     num_k_bins=50, # num k points in the log k regime
@@ -30,6 +31,9 @@ Fs, F_unc, ks, F_unbinned, F_unc_unbinned, k_unbinned, k_x, k_y = scattering_fun
     linear_log_crossover_k=1, # k value at the crossover from the linear to log regime
     use_doublesided_k=True, # calculate the (redundant) other half of k-space
 )
+# Fs is F(k, t), shape (num d_frames) x (num k points)
+# same for ks, giving the k value for each point as above. Therefore, every row is identical
+
 print('finished')
 # on the k points:
 # the ks are currently distributed linearly between 0 and linear_log_crossover with step size min_K

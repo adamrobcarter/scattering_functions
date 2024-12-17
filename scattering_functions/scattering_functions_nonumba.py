@@ -144,11 +144,20 @@ def intermediate_scattering(F_type, num_k_bins, max_time_origins, d_frames, part
     """
     assert not np.isnan(max_K)
     assert 0 in d_frames, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
+    assert max(d_frames) < len(particles_at_frame), f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(d_frames)}.'
+
     d_frames = np.array(d_frames) # (possible) list to ndarray
 
     k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_zero=use_zero, use_big_k=use_big_k, linear_log_crossover_k=linear_log_crossover_k, use_doublesided_k=use_doublesided_k)
-    
     num_k_bins = k_bins.size - 1
+    
+    min_process_size = (k_x.size * k_y.size * particles_at_frame[0, :, 0].size) + (k_x.size * k_y.size * particles_at_frame[0, :, 1].size)
+    min_process_ram = min_process_size*particles_at_frame.itemsize
+    total_ram = min_process_ram * cores
+    print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB, min total RAM: {total_ram/1e9:.1f}GB') # should be 7 GB
+    assert total_ram < 60e9
+    if total_ram > 20e9:
+        warnings.warn(f'total RAM usage about {total_ram/1e9:.0f}GB')
 
     Fs    = np.full((len(d_frames), num_k_bins), np.nan)
     F_unc = np.full((len(d_frames), num_k_bins), np.nan)
@@ -175,15 +184,18 @@ def intermediate_scattering(F_type, num_k_bins, max_time_origins, d_frames, part
 
     print('beginning computation')
 
-    progress = tqdm.tqdm(total=len(d_frames)*num_timesteps//use_every_nth_frame, smoothing=0.03) # low smoothing makes it more like average speed and less like instantaneous speed
+    progress = tqdm.tqdm(total=len(d_frames)*num_timesteps//use_every_nth_frame, smoothing=0.03, desc='computing') # low smoothing makes it more like average speed and less like instantaneous speed
 
-    if cores > 16:
-        warnings.warn(f'using {cores} cores')
 
     if cores > 1:
         pool = multiprocessing.Pool(cores)
+        if cores > 16:
+            warnings.warn(f'using {cores} cores')
+        else:
+            print(f'using {cores} cores')
     else:
         pool = None
+        print('running single threaded')
         
     for dframe_i in range(len(d_frames)):
         F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(dframe_i, F_type=F_type,
@@ -207,48 +219,50 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, use_every_nth_frame, d_
     d_frame = int(d_frames[dframe_i])
 
     assert num_frames > d_frame, f'd_frame={d_frame}, num_frames={num_frames}'
+    assert particles_at_frame.dtype == np.float32
 
-    time_origins_to_use = range(0, num_frames-d_frame-1, use_every_nth_frame)
-    assert len(time_origins_to_use) > 0
+    time_origins_to_use = range(0, num_frames-d_frame, use_every_nth_frame)
+    assert len(time_origins_to_use) > 0, f'time_origins_to_use = {time_origins_to_use}'
 
     assert max(time_origins_to_use) + d_frame < num_frames
     
     num_used_time_origins = len(time_origins_to_use)
+    mean_num_particles = np.count_nonzero(np.isfinite(particles_at_frame)) / particles_at_frame.shape[0] / 2 # div 2 for x and y
 
     F = np.full((num_used_time_origins, k_bins.size-1), np.nan)
     k = np.full((k_bins.size-1),                  np.nan) # +1 b/c we get the left and right of the final bin
     F_full     = np.full((num_used_time_origins, k_x.size, k_y.size), np.nan)
-    F_unc_full = np.full((num_used_time_origins, k_x.size, k_y.size), np.nan)
     k_full     = np.full((k_x.size, k_y.size),                  np.nan)
                     
     if F_type == 'F_s':
         func = self_intermediate_scattering_internal
     else:
         func = intermediate_scattering_internal
+        # func = intermediate_scattering_internal_incremental
 
     
     bound = functools.partial(intermediate_scattering_preprocess_run_postprocess,
                                 k_x, k_y, k_bins, func)
     
-    particles = []
+    particles = [] # this is a misnomer
     # for frame_index in tqdm.trange(num_used_frames, desc='preparing data', leave=False):
     for frame_index in range(num_used_time_origins):
         time_origin = int(time_origins_to_use[frame_index])
         particles.append((particles_at_frame[time_origin, :, :], particles_at_frame[time_origin+d_frame, :, :]))
 
-    # print('passing', common.arraysize(particles[0][0], 2), 'to each process')
-
     # results = pool.map(bound, particles, chunksize=1)
     # progress.update(len(results))
 
+    results = []
     if pool:
-        results = []
         tasks = pool.imap(bound, particles, chunksize=1)
         for result in tasks:
             results.append(result)
             progress.update()
     else:
-        results = map(bound, tqdm.tqdm(particles))
+        for particleset in particles:
+            results.append(bound(particleset))
+            progress.update()
 
     # results is now (num used frames) x 2 x (len of slice)
     for i, result in enumerate(results):
@@ -264,32 +278,19 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, use_every_nth_frame, d_
             assert np.array_equal(k_full, k_unbinned, equal_nan=True)
 
     # need nanmean because binned_statistic will return nan if the bin is empty
-    return np.nanmean(F, axis=0), np.nanstd(F, axis=0)/np.sqrt(num_used_time_origins), k, np.nanmean(F_full, axis=0), np.nanstd(F_full, axis=0)/np.sqrt(num_used_time_origins), k_full
+    return np.nanmean(F, axis=0), np.nanstd(F, axis=0)/np.sqrt(num_used_time_origins*mean_num_particles), k, np.nanmean(F_full, axis=0), np.nanstd(F_full, axis=0)/np.sqrt(num_used_time_origins), k_full
 
 
 def intermediate_scattering_preprocess_run_postprocess(k_x, k_y, k_bins, func, particles):
-    particles_t0, particles_t1 = preprocess_scattering(particles[0], particles[1])
-    k_unbinned, F_unbinned = func(particles_t0, particles_t1, k_x, k_y)
+    # there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
+
+    k_unbinned, F_unbinned = func(particles[0], particles[1], k_x, k_y)
     
     assert np.isnan(F_unbinned).sum() <= 1, f'F was {np.isnan(F_unbinned).sum()/F_unbinned.size*100:.0f}% NaN'
     # one nan point is allowed at k=(0, 0)
     
     k_binned, F_binned = postprocess_scattering(k_unbinned, F_unbinned, k_bins)
     return k_binned, F_binned, k_unbinned, F_unbinned
-
-def preprocess_scattering(particles_t0, particles_t1):
-    # first remove any nan particles
-    t0_nans = np.any(np.isnan(particles_t0), axis=1)
-    t1_nans = np.any(np.isnan(particles_t1), axis=1)
-    # # nans = t0_nans | t1_nans
-    # # print(f'missing particles: {nans.sum()/nans.size*100}%')
-    particles_t0 = particles_t0[~t0_nans, :]
-    particles_t1 = particles_t1[~t1_nans, :]
-
-    # assert np.isnan(particles_t0).sum() == 0
-    # assert np.isnan(particles_t1).sum() == 0
-
-    return particles_t0, particles_t1
 
 def postprocess_scattering(k, F, k_bins):
     # any nan points in f we remove, and we remove them from k too. These nans are the ones we set during the calculation
@@ -340,8 +341,6 @@ def get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_zer
 
     assert np.isnan(k_x).sum() == 0
     assert np.isnan(k_y).sum() == 0
-    
-    # assert np.isclose(k_x.mean(), 0), f'k_x.mean() = {k_x.mean()}'
 
     # there's a small problem here as we double count the points on k_x = 0 when on not doublesided mode
 
@@ -349,6 +348,12 @@ def get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_zer
 
 def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     # Thorneywork et al 2018 eq (27))
+    
+    # there are nans b/c we padded a numpy array with them
+    t0_nans = np.any(np.isnan(particles_t0), axis=1)
+    t1_nans = np.any(np.isnan(particles_t1), axis=1)
+    particles_t0 = particles_t0[~t0_nans, :]
+    particles_t1 = particles_t1[~t1_nans, :]
     
     particle_t0_x = particles_t0[:, 0]
     particle_t0_y = particles_t0[:, 1]
@@ -381,8 +386,8 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     # TODO: do we not need to consider negative n?!!
     # actually I think not because we already consider u -> v and v -> u
 
-    k_dot_r_mu = np.multiply(k_x, x_mu, dtype=np.float32) + np.multiply(k_y, y_mu, dtype=np.float32) # this used to by dtype=f64 but idk why
-    k_dot_r_nu = np.multiply(k_x, x_nu, dtype=np.float32) + np.multiply(k_y, y_nu, dtype=np.float32)
+    k_dot_r_mu = k_x * x_mu + k_y * y_mu # this used to by dtype=f64 but idk why
+    k_dot_r_nu = k_x * x_nu + k_y * y_nu
 
     # set the k=(0, 0) point to nan
     k_dot_r_mu[:, :, x_zero_index, y_zero_index] = np.nan
@@ -411,14 +416,100 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     if num_particles == 0:
         warnings.warn('found no particles in either timestep')
         f = np.zeros_like(cos_accum)
+        f[:, x_zero_index, y_zero_index] = np.nan
     else:
         f = 1/num_particles * ( cos_accum + sin_accum )
     # del cos_accum, sin_accum # probably unneeded
 
     f = np.squeeze(f) # idk why by shape is currently (1, 132, 156)
-    assert np.isnan(f[x_zero_index, y_zero_index])
+    assert np.isnan(f[x_zero_index, y_zero_index]), f'f[x_zero_index, y_zero_index] = {f[x_zero_index, y_zero_index]}'
 
     return k, f
+
+def intermediate_scattering_internal_incremental(particles_t0, particles_t1, k_x, k_y):
+    # Thorneywork et al 2018 eq (27))
+    # print('starting calc')
+    
+    # there are nans b/c we padded a numpy array with them
+    t0_nans = np.any(np.isnan(particles_t0), axis=1)
+    t1_nans = np.any(np.isnan(particles_t1), axis=1)
+    particles_t0 = particles_t0[~t0_nans, :]
+    particles_t1 = particles_t1[~t1_nans, :]
+    
+    particle_t0_x = particles_t0[:, 0]
+    particle_t0_y = particles_t0[:, 1]
+    particle_t1_x = particles_t1[:, 0]
+    particle_t1_y = particles_t1[:, 1]
+
+    # dimensions are
+    # nu x kx x ky
+    # x_mu = particle_t0_x[:, np.newaxis, np.newaxis, np.newaxis]
+    # y_mu = particle_t0_y[:, np.newaxis, np.newaxis, np.newaxis]
+    x_nu = particle_t1_x[:, np.newaxis, np.newaxis]
+    y_nu = particle_t1_y[:, np.newaxis, np.newaxis]
+    # print('x dtype', x_mu.dtype)
+
+    k_x_ = k_x[:, np.newaxis]
+    k_y_ = k_y[np.newaxis, :]
+    k = np.sqrt(k_x_**2 + k_y_**2)
+
+    # we gonna set the k=(0, 0) point to nan later, for now we save where it is
+    assert np.sum(k_x == 0) == 1, f'np.sum(k_x == 0) = {np.sum(k_x == 0)}'
+    assert np.sum(k_y == 0) == 1, f'np.sum(k_y == 0) = {np.sum(k_y == 0)}'
+    k_x_zero_index = np.argmax(k_x == 0)
+    k_y_zero_index = np.argmax(k_y == 0)
+    assert k_x[k_x_zero_index] == 0
+    assert k_y[k_y_zero_index] == 0
+
+    all_f = np.full((particles_t0.shape[0], k_x.size, k_y.size), np.nan, dtype=np.float32)
+    print(f'all_f {all_f.nbytes/1e9:.1f}GB')
+
+    k_x = k_x[np.newaxis, :, np.newaxis]
+    k_y = k_y[np.newaxis, np.newaxis, :]
+
+    assert k_x.dtype == np.float32, f'k_x.dtype = {k_x.dtype}'
+    assert particles_t0.dtype == np.float32, f'particles_t0.dtype = {particles_t0.dtype}'
+    
+    for mu in range(particles_t1.shape[0]):
+        x_mu = particle_t0_x[mu]
+        y_mu = particle_t0_y[mu]
+
+        k_dot_r_mu = k_x * x_mu  +  k_y * y_mu # this used to by dtype=f64 but idk why
+        k_dot_r_nu = k_x * x_nu  +  k_y * y_nu
+
+        # set the k=(0, 0) point to nan
+        k_dot_r_mu[:, k_x_zero_index, k_y_zero_index] = np.nan
+        k_dot_r_nu[:, k_x_zero_index, k_y_zero_index] = np.nan
+
+        cos_term1 = np.cos(k_dot_r_mu) # sum over mu
+        cos_term2 = np.cos(k_dot_r_nu).sum(axis=0) # sum over nu
+        cos_accum = cos_term1 * cos_term2
+        del cos_term1, cos_term2
+        
+        sin_term1 = np.sin(k_dot_r_mu)
+        sin_term2 = np.sin(k_dot_r_nu).sum(axis=0)
+        sin_accum = sin_term1 * sin_term2
+        # print(f'k_dot_r_mu+k_dot_r_nu {k_dot_r_mu.nbytes/1e9+k_dot_r_nu.nbytes/1e9:.1f}GB')
+        del sin_term1, sin_term2
+        del k_dot_r_mu, k_dot_r_nu
+    
+        num_particles = (particles_t0.shape[0] + particles_t1.shape[0]) / 2
+        if num_particles == 0:
+            warnings.warn('found no particles in either timestep')
+            f = np.zeros_like(cos_accum)
+        else:
+            f = 1/num_particles * ( cos_accum + sin_accum )
+        # del cos_accum, sin_accum # probably unneeded
+
+        f = np.squeeze(f) # idk why by shape is currently (1, 132, 156)
+        assert np.isnan(f[k_x_zero_index, k_y_zero_index])
+
+        all_f[mu, :, :] = f
+
+    all_f = all_f.sum(axis=0) # sum over mu
+
+    # print('finished calc')
+    return k, all_f
 
 # def distinct_intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     
@@ -442,7 +533,6 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
 
 #     k_dot_r_mu = np.multiply(k_x, x_mu, dtype='float64') + np.multiply(k_y, y_mu, dtype='float64')
 #     k_dot_r_nu = np.multiply(k_x, x_nu, dtype='float64') + np.multiply(k_y, y_nu, dtype='float64')
-#     # print(k_x.mean(), k_y.mean(), x_mu.mean(), x_nu.mean(), y_mu.mean(), y_nu.mean(), k_dot_r_mu.mean(), k_dot_r_nu.mean())
 #     # k_dot_r_mu = k_x * x_mu + k_y * y_mu
 #     # k_dot_r_nu = k_x * x_nu + k_y * y_nu
 
@@ -472,8 +562,6 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
 def self_intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     # remove particles that were nan in both sets
     nans = np.isnan(particles_t0[:, 0]) | np.isnan(particles_t1[:, 0])
-
-    print(nans.shape, particles_t0.shape, particles_t1.shape)
     
     particles_t0 = particles_t0[~nans, :]
     particles_t1 = particles_t1[~nans, :]
