@@ -181,10 +181,10 @@ def get_particles_at_frame(F_type, particles):
     return particles_at_frame, times
 
 def intermediate_scattering(
-        F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_K, min_K, cores,
+        F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_k, min_k, cores,
         use_doublesided_k=False, Lx=None, Ly=None, window=None,
     ):
-    assert np.isfinite(max_K)
+    assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
     assert 0 in t, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
     assert max(t) < len(particles_at_frame), f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}.'
@@ -192,7 +192,7 @@ def intermediate_scattering(
     t = np.array(t) # (possible) list to ndarray
     num_timesteps = times_at_frame.size
 
-    k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_doublesided_k=use_doublesided_k)
+    k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_doublesided_k=use_doublesided_k)
     num_k_bins = k_bins.size - 1 # I'm sure this is here for a reason but what is the reason?
     assert np.isfinite(k_x).all()
     assert np.isfinite(k_y).all()
@@ -366,23 +366,23 @@ def postprocess_scattering(k, F, k_bins):
 
     return k_binned, F_binned
 
-def quantise(values, min_K):
-    # return values with each element replaced by the closest multiple of min_K
-    v = values / min_K
+def quantise(values, min_k):
+    # return values with each element replaced by the closest multiple of min_k
+    v = values / min_k
     v = np.round(v)
-    quantised = v * min_K
+    quantised = v * min_k
     quantised = np.unique(quantised)
     return quantised
 
-def get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_doublesided_k=False):
-    # only allowed k values are multiples of min_K
+def get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_doublesided_k=False):
+    # only allowed k values are multiples of min_k
     # but we want log-spaced values
-    k_oneside_x = np.logspace(np.log10(min_K[0]), np.log10(max_K), num_k_bins, dtype=np.float32)
-    # so we take log-spaced values and move them to the nearest multiple of min_K
-    k_oneside_x = quantise(k_oneside_x, min_K[0])
+    k_oneside_x = np.logspace(np.log10(min_k[0]), np.log10(max_k), num_k_bins, dtype=np.float32)
+    # so we take log-spaced values and move them to the nearest multiple of min_k
+    k_oneside_x = quantise(k_oneside_x, min_k[0])
     
-    k_oneside_y = np.logspace(np.log10(min_K[1]), np.log10(max_K), num_k_bins, dtype=np.float32)
-    k_oneside_y = quantise(k_oneside_y, min_K[1])
+    k_oneside_y = np.logspace(np.log10(min_k[1]), np.log10(max_k), num_k_bins, dtype=np.float32)
+    k_oneside_y = quantise(k_oneside_y, min_k[1])
 
     k_x = np.concatenate([-k_oneside_x[::-1], (0,), k_oneside_x], dtype=np.float32)
 
