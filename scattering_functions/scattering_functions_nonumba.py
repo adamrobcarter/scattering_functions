@@ -2,14 +2,20 @@ import numpy as np
 import scipy.stats
 import multiprocessing
 import functools
-import tqdm
-import warnings, time
+import warnings
+import collections
+
+# we use tqdm for nice progress bars if it is available
+try:
+    import tqdm
+    # progressbar = functools.partial(tqdm.tqdm, leave=False)
+    progressbar = tqdm.tqdm
+except ImportError:
+    progressbar = lambda x, desc=None, total=None: x
 
 def get_frames_with_delta_t(t, dt):
     # find all pairs of frames in `t` separated by `dt`
     pairs = []
-
-    print('t[:10]', t[:10])
 
     pairs = np.zeros((len(t), 2), dtype=int)
     num_pairs_found = 0
@@ -48,6 +54,7 @@ def get_particles_at_frame(F_type, particles):
     num_timesteps = times.size
     max_particles_at_frame = num_particles_at_frame.max()
     assert num_particles_at_frame.size == num_timesteps, f'{num_particles_at_frame.size} != {num_timesteps}'
+    assert max_particles_at_frame < 1.5 * num_particles_at_frame.mean(), f'max particles at frame {max_particles_at_frame} avg particles at frame {num_particles_at_frame.mean():.1f}'
 
     if F_type == 'F_s':
         # for Fself, we need the IDs, so we provide a list where the nth element is the nth particle
@@ -63,7 +70,7 @@ def get_particles_at_frame(F_type, particles):
         i = 0
         MIN_TRAJ_LENGTH = 50
         good_ids = []
-        progress = tqdm.tqdm(total=particles.shape[0], desc='finding trajectories')
+        progress = progressbar(total=particles.shape[0], desc='finding trajectories')
         skipped = 0
         while i < particles.shape[0]-1:
             start_i = i
@@ -103,7 +110,7 @@ def get_particles_at_frame(F_type, particles):
         # save these trajectories in a new shape
         particles_at_frame = np.full((num_timesteps, len(good_ids), 2), np.nan)
         xys = particles[:, [0, 1]]
-        for j in tqdm.trange(len(good_ids), desc='reshaping'):
+        for j in progressbar(range(len(good_ids)), desc='reshaping for self'):
             old_id = good_ids[j][0]
             new_id = j # need to resample the IDs when we remove some particles
             start_t = int(particles[good_ids[j][1],   2])
@@ -144,20 +151,22 @@ def get_particles_at_frame(F_type, particles):
         #     particles_at_frame[timestep, num_done_per_timestep[timestep], :] = (row[0], row[1])
         #     num_done_per_timestep[timestep] += 1
 
-        # the below is a heavily-optimised method for turning the array of particles
+        # the below is an optimised method for turning the array of particles
         # into an array that is (num timesteps) x (max particles per timestep) x 2
         # we add extra nan rows such that each timestep has the same number of rows
+
         num_extra_rows = (max_particles_at_frame - num_particles_at_frame).sum()
-        extra_rows = np.full((num_extra_rows, 3), np.nan)
+        extra_rows = np.full((num_extra_rows, 3), np.nan, dtype=particles.dtype)
+        assert extra_rows.size < 0.2 * particles.size, f'extra_rows.size = {extra_rows.size}, particles.size = {particles.size}'
+        
         num_rows_added = 0
-        for frame in tqdm.trange(num_timesteps, desc='reshaping', leave=False):
+        for frame in progressbar(range(num_timesteps), desc='reshaping'):
             for i in range(max_particles_at_frame-num_particles_at_frame[frame]):
                 extra_rows[num_rows_added, 2] = times[frame]
                 num_rows_added += 1
 
         all_rows = np.concatenate((particles, extra_rows), dtype=particles.dtype, axis=0)
         del particles, extra_rows
-
         # then by sorting and reshaping, we can get the structure we want
         all_rows = all_rows[all_rows[:, 2].argsort()]
         # all_rows.view('f4,f4,f4').sort(order=['f2'], axis=0) # this is a way of sorting the array by the 3rd (f2) column in place, saves loads of ram but takes much longer
@@ -173,17 +182,8 @@ def get_particles_at_frame(F_type, particles):
 
 def intermediate_scattering(
         F_type, num_k_bins, max_time_origins, d_frames, particles_at_frame, times, max_K, min_K, cores,
-        use_zero=True, use_big_k=True, linear_log_crossover_k=1, use_doublesided_k=False, Lx=None, Ly=None, window=None,
+        use_doublesided_k=False, Lx=None, Ly=None, window=None,
     ):
-    """
-    F_type: 'F' or 'F_s' for the self-ISF. The self-ISF code is probably broken atm
-    num_k_bins: number of k points. Computation time is proportional to this squared
-    max_time_origins: averages will be taken over this many different time origins. Computation time is directly proportional to this
-    d_frames: an array of values of delta (frame number) that will be calculated (s.t. delta t is this multiplied by the timestep)
-    particles_at_frame: list of lists of (x, y) for each timesep
-    max_K:
-    min_K: 2d list/tuple/ndarray as (min_K_x, min_K_y)
-    """
     assert np.isfinite(max_K)
     assert np.isfinite(times).all()
     assert 0 in d_frames, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
@@ -192,8 +192,8 @@ def intermediate_scattering(
     d_frames = np.array(d_frames) # (possible) list to ndarray
     num_timesteps = times.size
 
-    k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_zero=use_zero, use_big_k=use_big_k, linear_log_crossover_k=linear_log_crossover_k, use_doublesided_k=use_doublesided_k)
-    num_k_bins = k_bins.size - 1
+    k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_doublesided_k=use_doublesided_k)
+    num_k_bins = k_bins.size - 1 # I'm sure this is here for a reason but what is the reason?
     assert np.isfinite(k_x).all()
     assert np.isfinite(k_y).all()
 
@@ -225,7 +225,7 @@ def intermediate_scattering(
 
     print('beginning computation')
 
-    progress = tqdm.tqdm(total=len(d_frames)*min(num_timesteps, max_time_origins), smoothing=0.03, desc='computing') # low smoothing makes it more like average speed and less like instantaneous speed
+    progress = progressbar(total=len(d_frames)*min(num_timesteps-1, max_time_origins), smoothing=0.03, desc='computing') # low smoothing makes it more like average speed and less like instantaneous speed
 
 
     if cores > 1:
@@ -239,17 +239,29 @@ def intermediate_scattering(
         print('running single threaded')
 
     if window == 'blackmanharris':
+        raise Exception('you need to fix this - you disabled the normalisation cause something weird was happening')
         print('using blackman-harris windowing')
         assert Lx and np.isfinite(Lx), 'when using blackman-harris windowing, you must supply the extent of the data'
         assert Ly and np.isfinite(Ly), 'when using blackman-harris windowing, you must supply the extent of the data'
         window_func = functools.partial(blackman_harris_window, Lx, Ly)
     else:
         window_func = no_window
+
+    # before we do the calculation we get the pairs of frames
+    # this is so if there are no frames with a certain dt, we can raise the error before the calculation starts
+    # which is a lot less anoying than it failing halfway through
+    pairs_at_dframe = []
+    warnings.warn('d_frame is now d_time')
+    for dframe_i in range(len(d_frames)):
+        pairs = get_frames_with_delta_t(times, d_frames[dframe_i])
+        assert len(pairs)
+        pairs_at_dframe.append(pairs)
         
+    # do the actual calculation
     for dframe_i in range(len(d_frames)):
         F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(dframe_i, F_type=F_type,
                             max_time_origins=max_time_origins, d_frames=d_frames, particles_at_frame=particles_at_frame,
-                            times=times,
+                            times=times, pairs=pairs_at_dframe[dframe_i],
                             num_frames=num_timesteps, k_x=k_x, k_y=k_y, k_bins=k_bins, pool=pool, progress=progress, window_func=window_func)
         
         Fs   [dframe_i, :] = F_
@@ -266,9 +278,10 @@ def intermediate_scattering(
 
     assert np.any(Fs > 0.001)
 
-    return Fs, F_unc, ks, Fs_full, F_uncs_full, ks_full, k_x, k_y
+    Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_x', 'k_y'])
+    return Results(F=Fs, F_unc=F_unc, k=ks, F_full=Fs_full, F_unc_full=F_uncs_full, k_full=ks_full, k_x=k_y, k_y=k_y)
 
-def intermediate_scattering_for_dframe(dframe_i, F_type, max_time_origins, d_frames, particles_at_frame, num_frames, k_x, k_y, k_bins, pool, progress, window_func, times):
+def intermediate_scattering_for_dframe(dframe_i, F_type, max_time_origins, d_frames, particles_at_frame, num_frames, k_x, k_y, k_bins, pool, progress, window_func, times, pairs):
     d_frame = d_frames[dframe_i]
 
     assert num_frames > d_frame, f'd_frame={d_frame}, num_frames={num_frames}'
@@ -277,13 +290,11 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, max_time_origins, d_fra
     # time_origins_to_use = range(0, num_frames-d_frame, use_every_nth_frame)
     # assert len(time_origins_to_use) > 0, f'time_origins_to_use = {time_origins_to_use}'
 
-    particles = [] # this is a misnomer
-    warnings.warn('d_frame is now d_time')
-    pairs = get_frames_with_delta_t(times, d_frame)
-    assert len(pairs)
 
     use_every_nth_pair = int(np.ceil(pairs.shape[0] / max_time_origins))
     print(f'd_frame = {d_frame} : use_every_nth_pair = {use_every_nth_pair}')
+
+    particles = [] # this is a misnomer
 
     for [frame1, frame2] in pairs[::use_every_nth_pair, :]:
         particles.append((particles_at_frame[frame1, :, :], particles_at_frame[frame2, :, :]))
@@ -357,13 +368,15 @@ def postprocess_scattering(k, F, k_bins):
     # any nan points in f we remove, and we remove them from k too. These nans are the ones we set during the calculation
     F_flat = F.flatten()
     k_flat = k.flatten()
-    nans = np.isnan(F_flat)
+    nans = np.isnan(F_flat) # where do we expect nans and why?
 
     assert np.isfinite(k_flat).all()
     # assert np.any(F_flat > 0.001)
-    # print()
-    # print('F_flat nanmax', np.nanmax(F_flat))
 
+    # we should probably filter out points at k > k_bins[max] 
+    
+    assert np.all(k_flat[~nans] >= k_bins[0] ), f'k_flat[~nans].min() = {k_flat[~nans].min()}, k_bins[0] = {k_bins[0]}'
+    
     F_binned, _, _ = scipy.stats.binned_statistic(k_flat[~nans], F_flat[~nans], 'mean', bins=k_bins)
     k_binned, _, _ = scipy.stats.binned_statistic(k_flat[~nans], k_flat[~nans], 'mean', bins=k_bins)
 
@@ -384,37 +397,36 @@ def postprocess_scattering(k, F, k_bins):
 
     return k_binned, F_binned
 
-def get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_zero, use_big_k=True, linear_log_crossover_k=1, use_doublesided_k=False):
-    assert use_zero
+def quantise(values, min_K):
+    # return values with each element replaced by the closest multiple of min_K
+    v = values / min_K
+    v = np.round(v)
+    quantised = v * min_K
+    quantised = np.unique(quantised)
+    return quantised
 
-    if True:
-        k_small_x = np.arange(min_K[0], linear_log_crossover_k, min_K[0], dtype=np.float32) # these used to be f64 but idk why
-        k_small_y = np.arange(min_K[1], linear_log_crossover_k, min_K[1], dtype=np.float32) 
-        k_big = np.logspace(np.log10(linear_log_crossover_k), np.log10(max_K), num_k_bins, dtype=np.float32)
-        
-        if use_big_k:
-            k_oneside_x = np.concatenate([k_small_x, k_big], dtype=np.float32)
-            k_oneside_y = np.concatenate([k_small_y, k_big], dtype=np.float32)
-        else:
-            k_oneside_x = k_small_x
-            k_oneside_y = k_small_y
+def get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_doublesided_k=False):
+    # only allowed k values are multiples of min_K
+    # but we want log-spaced values
+    k_oneside_x = np.logspace(np.log10(min_K[0]), np.log10(max_K), num_k_bins, dtype=np.float32)
+    # so we take log-spaced values and move them to the nearest multiple of min_K
+    k_oneside_x = quantise(k_oneside_x, min_K[0])
+    
+    k_oneside_y = np.logspace(np.log10(min_K[1]), np.log10(max_K), num_k_bins, dtype=np.float32)
+    k_oneside_y = quantise(k_oneside_y, min_K[1])
 
-        if use_zero:
-            k_x = np.concatenate([-k_oneside_x[::-1], (0,), k_oneside_x], dtype=np.float32)
-        else:
-            k_x = np.concatenate([-k_oneside_x[::-1], k_oneside_x], dtype=np.float32)
+    k_x = np.concatenate([-k_oneside_x[::-1], (0,), k_oneside_x], dtype=np.float32)
 
-        if use_doublesided_k:
-            if use_zero:
-                k_y = np.concatenate([-k_oneside_y[::-1], (0,), k_oneside_y], dtype=np.float32)
-            else:
-                k_y = np.concatenate([-k_oneside_y[::-1], k_oneside_y], dtype=np.float32)
+    if use_doublesided_k:
+        k_y = np.concatenate([-k_oneside_y[::-1], (0,), k_oneside_y], dtype=np.float32)
 
-        else:
-            k_y = np.concatenate([(0,), k_oneside_y], dtype=np.float32)
+    else:
+        k_y = np.concatenate([(0,), k_oneside_y], dtype=np.float32)
 
-        # bin_edges = np.concatenate([(0,), np.logspace(np.log10(min_K), np.log10(max_K), num_k_bins)])
-        bin_edges = np.concatenate([(0,), k_oneside_x], dtype=np.float32)
+    bin_edges = np.concatenate([(0,), k_oneside_x], dtype=np.float32)
+
+    assert np.unique(bin_edges).size == bin_edges.size, 'duplicate values were found in bin_edges'
+    assert np.all(k_oneside_x >= bin_edges[0] ), f'k_oneside_x.min() = {k_oneside_x.min()}, bin_edges[0] = {bin_edges[0]}'
 
     assert np.isnan(k_x).sum() == 0
     assert np.isnan(k_y).sum() == 0
@@ -506,8 +518,9 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, windo
     del sin_term1, sin_term2
     del k_dot_r_mu, k_dot_r_nu
     
-    # num_particles = (particles_t0.shape[0] + particles_t1.shape[0]) / 2
-    num_particles = (np.squeeze(mu_weights) + np.squeeze(nu_weights)).sum() / 2 # adding them like this seems sus no?
+    num_particles = (particles_t0.shape[0] + particles_t1.shape[0]) / 2
+    # print('mu weights nu', mu_weights, nu_weights)
+    # num_particles = (np.squeeze(mu_weights) + np.squeeze(nu_weights)).sum() / 2 # adding them like this seems sus no?
     if num_particles == 0:
         warnings.warn('found no particles in either timestep')
         f = np.zeros_like(cos_accum)
