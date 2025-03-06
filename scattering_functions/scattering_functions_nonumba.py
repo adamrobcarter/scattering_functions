@@ -181,16 +181,16 @@ def get_particles_at_frame(F_type, particles):
     return particles_at_frame, times
 
 def intermediate_scattering(
-        F_type, num_k_bins, max_time_origins, d_frames, particles_at_frame, times, max_K, min_K, cores,
+        F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_K, min_K, cores,
         use_doublesided_k=False, Lx=None, Ly=None, window=None,
     ):
     assert np.isfinite(max_K)
-    assert np.isfinite(times).all()
-    assert 0 in d_frames, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
-    assert max(d_frames) < len(particles_at_frame), f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(d_frames)}.'
+    assert np.isfinite(times_at_frame).all()
+    assert 0 in t, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
+    assert max(t) < len(particles_at_frame), f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}.'
 
-    d_frames = np.array(d_frames) # (possible) list to ndarray
-    num_timesteps = times.size
+    t = np.array(t) # (possible) list to ndarray
+    num_timesteps = times_at_frame.size
 
     k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_K, max_K, num_k_bins, use_doublesided_k=use_doublesided_k)
     num_k_bins = k_bins.size - 1 # I'm sure this is here for a reason but what is the reason?
@@ -205,28 +205,16 @@ def intermediate_scattering(
     if total_ram > 20e9:
         warnings.warn(f'total RAM usage about {total_ram/1e9:.0f}GB')
 
-    Fs    = np.full((len(d_frames), num_k_bins), np.nan)
-    F_unc = np.full((len(d_frames), num_k_bins), np.nan)
+    F    = np.full((len(t), num_k_bins), np.nan)
+    F_unc = np.full((len(t), num_k_bins), np.nan)
     # print(f'F size {common.arraysize(Fs)}')
-    ks   = np.full((len(d_frames), num_k_bins), np.nan)
+    k   = np.full((len(t), num_k_bins), np.nan)
 
-    Fs_full     = np.full((len(d_frames), k_x.size, k_y.size), np.nan)
-    F_uncs_full = np.full((len(d_frames), k_x.size, k_y.size), np.nan)
-    ks_full     = np.full((len(d_frames), k_x.size, k_y.size), np.nan)
+    F_full     = np.full((len(t), k_x.size, k_y.size), np.nan)
+    F_unc_full = np.full((len(t), k_x.size, k_y.size), np.nan)
+    k_full     = np.full((len(t), k_x.size, k_y.size), np.nan)
 
-    warnings.warn('d_frames should probably be renamed d_times')
-
-    # first find the particles at each timestep, otherwise we're transferring
-    # the whole of data to each process
-    print('finding particles at each timestep')
-
-
-    assert np.all(d_frames <= times.max()), f'you have requested a d_frames ({d_frames.max()}) bigger than the greatest timestep in the data ({times.max()})'
-
-    print('beginning computation')
-
-    progress = progressbar(total=len(d_frames)*min(num_timesteps-1, max_time_origins), smoothing=0.03, desc='computing') # low smoothing makes it more like average speed and less like instantaneous speed
-
+    progress = progressbar(total=len(t)*min(num_timesteps-1, max_time_origins), smoothing=0.03, desc='computing') # low smoothing makes it more like average speed and less like instantaneous speed
 
     if cores > 1:
         pool = multiprocessing.Pool(cores)
@@ -250,57 +238,47 @@ def intermediate_scattering(
     # before we do the calculation we get the pairs of frames
     # this is so if there are no frames with a certain dt, we can raise the error before the calculation starts
     # which is a lot less anoying than it failing halfway through
-    pairs_at_dframe = []
-    warnings.warn('d_frame is now d_time')
-    for dframe_i in range(len(d_frames)):
-        pairs = get_frames_with_delta_t(times, d_frames[dframe_i])
+    pairs_at_t = []
+    for t_i in range(len(t)):
+        pairs = get_frames_with_delta_t(times_at_frame, t[t_i])
         assert len(pairs)
-        pairs_at_dframe.append(pairs)
+        pairs_at_t.append(pairs)
         
     # do the actual calculation
-    for dframe_i in range(len(d_frames)):
-        F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(dframe_i, F_type=F_type,
-                            max_time_origins=max_time_origins, d_frames=d_frames, particles_at_frame=particles_at_frame,
-                            times=times, pairs=pairs_at_dframe[dframe_i],
-                            num_frames=num_timesteps, k_x=k_x, k_y=k_y, k_bins=k_bins, pool=pool, progress=progress, window_func=window_func)
+    for t_i in range(len(t)):
+        F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(F_type=F_type,
+                            max_time_origins=max_time_origins, t=t, particles_at_frame=particles_at_frame,
+                            pairs=pairs_at_t[t_i],
+                            k_x=k_x, k_y=k_y, k_bins=k_bins, pool=pool, progress=progress, window_func=window_func)
         
-        Fs   [dframe_i, :] = F_
-        F_unc[dframe_i, :] = F_unc_
-        ks   [dframe_i, :] = k_
-        Fs_full    [dframe_i, :, :] = F_unbinned
-        F_uncs_full[dframe_i, :, :] = F_unc_unbinned
-        ks_full    [dframe_i, :, :] = k_unbinned
+        F   [t_i, :] = F_
+        F_unc[t_i, :] = F_unc_
+        k   [t_i, :] = k_
+        F_full    [t_i, :, :] = F_unbinned
+        F_unc_full[t_i, :, :] = F_unc_unbinned
+        k_full    [t_i, :, :] = k_unbinned
 
     if cores > 1:
         pool.close()
 
-    assert np.isfinite(ks).sum()/ks.size > 0.5
+    assert np.isfinite(k).sum()/k.size > 0.5
 
-    assert np.any(Fs > 0.001)
+    assert np.any(F > 0.001)
 
     Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_x', 'k_y'])
-    return Results(F=Fs, F_unc=F_unc, k=ks, F_full=Fs_full, F_unc_full=F_uncs_full, k_full=ks_full, k_x=k_y, k_y=k_y)
+    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_x=k_y, k_y=k_y)
 
-def intermediate_scattering_for_dframe(dframe_i, F_type, max_time_origins, d_frames, particles_at_frame, num_frames, k_x, k_y, k_bins, pool, progress, window_func, times, pairs):
-    d_frame = d_frames[dframe_i]
-
-    assert num_frames > d_frame, f'd_frame={d_frame}, num_frames={num_frames}'
+def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at_frame, k_x, k_y, k_bins, pool, progress, window_func, pairs):
     assert particles_at_frame.dtype == np.float32
 
-    # time_origins_to_use = range(0, num_frames-d_frame, use_every_nth_frame)
-    # assert len(time_origins_to_use) > 0, f'time_origins_to_use = {time_origins_to_use}'
-
-
     use_every_nth_pair = int(np.ceil(pairs.shape[0] / max_time_origins))
-    print(f'd_frame = {d_frame} : use_every_nth_pair = {use_every_nth_pair}')
 
-    particles = [] # this is a misnomer
+    pairs_of_particles = []
 
     for [frame1, frame2] in pairs[::use_every_nth_pair, :]:
-        particles.append((particles_at_frame[frame1, :, :], particles_at_frame[frame2, :, :]))
-
+        pairs_of_particles.append((particles_at_frame[frame1, :, :], particles_at_frame[frame2, :, :]))
     
-    num_used_time_origins = len(particles)
+    num_used_time_origins = len(pairs_of_particles)
     mean_num_particles = np.count_nonzero(np.isfinite(particles_at_frame)) / particles_at_frame.shape[0] / 2 # div 2 for x and y
 
     F = np.full((num_used_time_origins, k_bins.size-1), np.nan)
@@ -314,23 +292,17 @@ def intermediate_scattering_for_dframe(dframe_i, F_type, max_time_origins, d_fra
         func = intermediate_scattering_internal
         # func = intermediate_scattering_internal_incremental
 
-    
     bound = functools.partial(intermediate_scattering_preprocess_run_postprocess,
                                 k_x, k_y, k_bins, func, window_func)
-    
-    # for frame_index in tqdm.trange(num_used_frames, desc='preparing data', leave=False):
-
-    # results = pool.map(bound, particles, chunksize=1)
-    # progress.update(len(results))
 
     results = []
     if pool:
-        tasks = pool.imap(bound, particles, chunksize=1)
+        tasks = pool.imap(bound, pairs_of_particles, chunksize=1)
         for result in tasks:
             results.append(result)
             progress.update()
     else:
-        for particleset in particles:
+        for particleset in pairs_of_particles:
             results.append(bound(particleset))
             progress.update()
 
@@ -391,9 +363,6 @@ def postprocess_scattering(k, F, k_bins):
     assert np.isfinite(k_binned).all()
 
     assert np.isnan(F_binned).sum() < F_binned.size
-
-    # print(F_binned)
-    # assert np.any(F_binned > 0.001)
 
     return k_binned, F_binned
 
@@ -492,9 +461,6 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, windo
 
     k_x = k_x[np.newaxis, np.newaxis, :, np.newaxis]
     k_y = k_y[np.newaxis, np.newaxis, np.newaxis, :]
-    
-    # TODO: do we not need to consider negative n?!!
-    # actually I think not because we already consider u -> v and v -> u
 
     k_dot_r_mu = k_x * x_mu + k_y * y_mu # this used to by dtype=f64 but idk why
     k_dot_r_nu = k_x * x_nu + k_y * y_nu
@@ -535,6 +501,7 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, windo
 
     return k, f
 
+"""
 def intermediate_scattering_internal_incremental(particles_t0, particles_t1, k_x, k_y):
     # Thorneywork et al 2018 eq (27))
     # print('starting calc')
@@ -618,7 +585,8 @@ def intermediate_scattering_internal_incremental(particles_t0, particles_t1, k_x
     all_f = all_f.sum(axis=0) # sum over mu
 
     # print('finished calc')
-    return k, all_f
+    return k, all_f"
+"""
 
 # def distinct_intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     
