@@ -1,5 +1,7 @@
 # Scattering Functions
 
+[![DOI](https://zenodo.org/badge/880394253.svg)](https://zenodo.org/badge/latestdoi/880394253)
+
 A library to calculate the intermediate scattering function / dynamic structure factor $F(k, t)$ from 2D particle coordinates, obtained from (eg) TrackPy. Can therefore also calulate the structure factor $S(k)$. Ability to calculate the self-ISF $F_s(k, t)$ is coming.
 
 ## Instalation
