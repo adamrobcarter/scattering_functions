@@ -163,7 +163,7 @@ def get_particles_at_frame(F_type, particles, dimension):
         assert extra_rows.size < 0.2 * particles.size, f'extra_rows.size = {extra_rows.size}, particles.size = {particles.size}'
         
         num_rows_added = 0
-        for frame in progressbar(range(num_timesteps), desc='reshaping'):
+        for frame in progressbar(range(num_timesteps), desc='reshaping', disable=True):
             for i in range(max_particles_at_frame-num_particles_at_frame[frame]):
                 extra_rows[num_rows_added, time_column] = times[frame]
                 num_rows_added += 1
