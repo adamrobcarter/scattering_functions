@@ -38,12 +38,12 @@ def generate_noninteracting_particles(L, phi, sigma, dt, D, max_t):
     return particles
 
 # generate some test data
-t_max = 1e4
-dt = 0.5
-L = 100
-D = 0.04
+t_max = 1e4 # s
+dt = 0.5    # s
+L = 100     # μm
+D = 0.04    # μm^2/s
 phi = 0.1
-sigma = 3
+sigma = 3   # μm
 particles = generate_noninteracting_particles(L, phi, sigma, dt, D, t_max)
 
 # calculating f(k, t) for every single timestep is uneeded - at large lag times you might as well space them logarithmically
@@ -78,7 +78,7 @@ for k_index in range(results.k.shape[1]):
     # don't plot the t=0 time point because it looks strange in semilogx
 
 ax_f.semilogx()
-ax_f.set_xlabel('$t$')
+ax_f.set_xlabel('$t$ (s)')
 ax_f.set_ylabel('$f(k, t)$')
 
 # f(k, t) = exp( -D k^t t )
@@ -86,8 +86,8 @@ ax_f.set_ylabel('$f(k, t)$')
 D_meas = - np.log(f[1, :]) / ( k[1, :]**2 * dt)
 ax_D.scatter(k[1, :], D_meas)
 
-ax_D.set_ylabel('$D$')
-ax_D.set_xlabel('$k$')
+ax_D.set_ylabel('$D$ (μm²/s)')
+ax_D.set_xlabel('$k$ (1/μm)')
 ax_D.set_ylim(0, 2*D)
 ax_D.semilogx()
 ax_D.hlines(D, k.min(), k.max(), color='grey')
