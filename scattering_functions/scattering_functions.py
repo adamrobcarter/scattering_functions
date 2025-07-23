@@ -43,27 +43,30 @@ def get_frames_with_delta_t(t, dt):
     assert np.isfinite(pairs).all()
     return pairs
 
-def get_particles_at_frame(F_type, particles):
+def get_particles_at_frame(F_type, particles, dimension):
     assert particles.dtype == np.float32
 
+    time_column = dimension
+
     # data is x,y,t
-    particles[:, 2] -= particles[:, 2].min() # convert time to being 0-based
+    particles[:, time_column] -= particles[:, time_column].min() # convert time to being 0-based
 
     # find max number of particles at any one timestep
-    times, num_particles_at_frame = np.unique(particles[:, 2], return_counts=True)
+    times, num_particles_at_frame = np.unique(particles[:, time_column], return_counts=True)
     num_timesteps = times.size
     max_particles_at_frame = num_particles_at_frame.max()
     assert num_particles_at_frame.size == num_timesteps, f'{num_particles_at_frame.size} != {num_timesteps}'
     assert max_particles_at_frame < 1.5 * num_particles_at_frame.mean(), f'max particles at frame {max_particles_at_frame} avg particles at frame {num_particles_at_frame.mean():.1f}'
 
     if F_type == 'F_s':
+        assert False
         # for Fself, we need the IDs, so we provide a list where the nth element is the nth particle
         assert particles.shape[1] == 4, 'for self intermediate scattering, you should provide rows of x,y,t,#'
 
         # we sort the ting by particle ID, then time
         print('sorting')
         particles = particles[particles[:, 3].argsort()]
-        particles = particles[np.lexsort((particles[:, 2], particles[:, 3]))] # sort by ID then time
+        particles = particles[np.lexsort((particles[:, time_column], particles[:, id_column]))] # sort by ID then time
         print('sorted')
 
         # find trajectories that are long enough
@@ -74,14 +77,14 @@ def get_particles_at_frame(F_type, particles):
         skipped = 0
         while i < particles.shape[0]-1:
             start_i = i
-            current_id = int(particles[i, 3])
-            start_time = particles[i, 2]
-            while i < particles.shape[0]-1 and particles[i, 3] == current_id:
+            current_id = int(particles[i, id_column])
+            start_time = particles[i, time_column]
+            while i < particles.shape[0]-1 and particles[i, id_column] == current_id:
                 i += 1
                 progress.update()
             end_i = i
             # print(particles[start_i:end_i, :])
-            end_time = particles[i-1, 2]
+            end_time = particles[i-1, time_column]
             # print(f'end_t={end_time}, start_t={start_time} i={i}')
             assert end_time >= start_time, f'end_t={end_time}, start_t={start_time}'
             traj_length = end_time - start_time
@@ -125,7 +128,7 @@ def get_particles_at_frame(F_type, particles):
             # if i > 10:
             #     break
 
-        num_particles = int(particles[:, 3].max()) + 1
+        num_particles = int(particles[:, id_column].max()) + 1
         assert num_particles > 0
 
         del particles
@@ -138,9 +141,9 @@ def get_particles_at_frame(F_type, particles):
         # some datasets may already have the ID in column 4, so we only select the first 3 columns
         # however this operation is memory-expensive for very large datasets
         if particles.size > 18e8:
-            assert particles.shape[1] == 3
+            assert particles.shape[1] == dimension+1
         else:
-            particles = particles[:, [0, 1, 2]]
+            particles = particles[:, :dimension+1]
 
         # this does what the below does but just slower
         # note this may be out of date since the discontinuous times update
@@ -156,21 +159,21 @@ def get_particles_at_frame(F_type, particles):
         # we add extra nan rows such that each timestep has the same number of rows
 
         num_extra_rows = (max_particles_at_frame - num_particles_at_frame).sum()
-        extra_rows = np.full((num_extra_rows, 3), np.nan, dtype=particles.dtype)
+        extra_rows = np.full((num_extra_rows, dimension+1), np.nan, dtype=particles.dtype)
         assert extra_rows.size < 0.2 * particles.size, f'extra_rows.size = {extra_rows.size}, particles.size = {particles.size}'
         
         num_rows_added = 0
         for frame in progressbar(range(num_timesteps), desc='reshaping'):
             for i in range(max_particles_at_frame-num_particles_at_frame[frame]):
-                extra_rows[num_rows_added, 2] = times[frame]
+                extra_rows[num_rows_added, time_column] = times[frame]
                 num_rows_added += 1
 
         all_rows = np.concatenate((particles, extra_rows), dtype=particles.dtype, axis=0)
         del particles, extra_rows
         # then by sorting and reshaping, we can get the structure we want
-        all_rows = all_rows[all_rows[:, 2].argsort()]
+        all_rows = all_rows[all_rows[:, time_column].argsort()]
         # all_rows.view('f4,f4,f4').sort(order=['f2'], axis=0) # this is a way of sorting the array by the 3rd (f2) column in place, saves loads of ram but takes much longer
-        particles_at_frame = all_rows.reshape((num_timesteps, max_particles_at_frame, 3))
+        particles_at_frame = all_rows.reshape((num_timesteps, max_particles_at_frame, dimension+1))
         del all_rows
         # now remove the time column, leaving just x and y
         particles_at_frame = particles_at_frame[:, :, [0, 1]]
@@ -182,7 +185,7 @@ def get_particles_at_frame(F_type, particles):
 
 def intermediate_scattering(
         F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_k, min_k, cores,
-        use_doublesided_k=False, Lx=None, Ly=None, window=None,
+        use_doublesided_k=False, Lx=None, Ly=None, window=None, quiet=False,
     ):
     assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
@@ -200,35 +203,34 @@ def intermediate_scattering(
     min_process_size = (k_x.size * k_y.size * particles_at_frame[0, :, 0].size) + (k_x.size * k_y.size * particles_at_frame[0, :, 1].size)
     min_process_ram = min_process_size*particles_at_frame.itemsize
     total_ram = min_process_ram * cores
-    print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB, min total RAM: {total_ram/1e9:.1f}GB') # should be 7 GB
+    if not quiet: print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB, min total RAM: {total_ram/1e9:.1f}GB') # should be 7 GB
     assert total_ram < 60e9
     if total_ram > 20e9:
         warnings.warn(f'total RAM usage about {total_ram/1e9:.0f}GB')
 
-    F    = np.full((len(t), num_k_bins), np.nan)
-    F_unc = np.full((len(t), num_k_bins), np.nan)
+    F    = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
+    F_unc = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
     # print(f'F size {common.arraysize(Fs)}')
-    k   = np.full((len(t), num_k_bins), np.nan)
+    k   = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
 
-    F_full     = np.full((len(t), k_x.size, k_y.size), np.nan)
-    F_unc_full = np.full((len(t), k_x.size, k_y.size), np.nan)
-    k_full     = np.full((len(t), k_x.size, k_y.size), np.nan)
+    F_full     = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
+    F_unc_full = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
+    k_full     = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
 
-    progress = progressbar(total=len(t)*min(num_timesteps-1, max_time_origins), smoothing=0.03, desc='computing') # low smoothing makes it more like average speed and less like instantaneous speed
+    progress = progressbar(total=len(t)*min(num_timesteps-1, max_time_origins), smoothing=0.03, desc='computing', disable=quiet) # low smoothing makes it more like average speed and less like instantaneous speed
 
     if cores > 1:
         pool = multiprocessing.Pool(cores)
         if cores > 16:
             warnings.warn(f'using {cores} cores')
         else:
-            print(f'using {cores} cores')
+            if not quiet: print(f'using {cores} cores')
     else:
         pool = None
-        print('running single threaded')
+        if not quiet: print('running single threaded')
 
     if window == 'blackmanharris':
-        raise Exception('you need to fix this - you disabled the normalisation cause something weird was happening')
-        print('using blackman-harris windowing')
+        if not quiet: print('using blackman-harris windowing')
         assert Lx and np.isfinite(Lx), 'when using blackman-harris windowing, you must supply the extent of the data'
         assert Ly and np.isfinite(Ly), 'when using blackman-harris windowing, you must supply the extent of the data'
         window_func = functools.partial(blackman_harris_window, Lx, Ly)
@@ -281,10 +283,10 @@ def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at
     num_used_time_origins = len(pairs_of_particles)
     mean_num_particles = np.count_nonzero(np.isfinite(particles_at_frame)) / particles_at_frame.shape[0] / 2 # div 2 for x and y
 
-    F = np.full((num_used_time_origins, k_bins.size-1), np.nan)
-    k = np.full((k_bins.size-1),                  np.nan) # +1 b/c we get the left and right of the final bin
-    F_full     = np.full((num_used_time_origins, k_x.size, k_y.size), np.nan)
-    k_full     = np.full((k_x.size, k_y.size),                  np.nan)
+    F = np.full((num_used_time_origins, k_bins.size-1), np.nan, dtype=np.float32)
+    k = np.full((k_bins.size-1),                        np.nan, dtype=np.float32) # +1 b/c we get the left and right of the final bin
+    F_full     = np.full((num_used_time_origins, k_x.size, k_y.size), np.nan, dtype=np.float32)
+    k_full     = np.full((k_x.size, k_y.size),                        np.nan, dtype=np.float32)
                     
     if F_type == 'F_s':
         func = self_intermediate_scattering_internal
@@ -410,8 +412,8 @@ def blackman_harris_window(Lx, Ly, x, y):
     # Giavazzi, F., Edera, P., Lu, P.J. et al. Image windowing mitigates edge effects in Differential Dynamic Microscopy
     # https://link.springer.com/article/10.1140/epje/i2017-11587-3
     # eq 10
-    assert np.all(x <= Lx)
-    assert np.all(y <= Ly)
+    # assert np.all(x <= Lx)
+    # assert np.all(y <= Ly)
 
     a = [0.3635819, 0.4891775, 0.1365995, 0.0106411]
     sum_internal = lambda j, coord, L: (-1)**j * a[j] * np.cos(2*np.pi * j * coord / L )
@@ -484,9 +486,9 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, windo
     del sin_term1, sin_term2
     del k_dot_r_mu, k_dot_r_nu
     
-    num_particles = (particles_t0.shape[0] + particles_t1.shape[0]) / 2
-    # print('mu weights nu', mu_weights, nu_weights)
-    # num_particles = (np.squeeze(mu_weights) + np.squeeze(nu_weights)).sum() / 2 # adding them like this seems sus no?
+    # num_particles = (particles_t0.shape[0] + particles_t1.shape[0]) / 2
+    num_particles = (mu_weights.sum() + nu_weights.sum()) / 2
+
     if num_particles == 0:
         warnings.warn('found no particles in either timestep')
         f = np.zeros_like(cos_accum)
