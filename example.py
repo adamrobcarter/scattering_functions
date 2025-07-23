@@ -32,7 +32,7 @@ def generate_noninteracting_particles(L, phi, sigma, dt, D, max_t):
     row = 0
     for t in tqdm.trange(num_timesteps, desc='forming array'):
         for i in range(num_particles):
-            particles[row, :] = [x[i, t], y[i, t], t]
+            particles[row, :] = [x[i, t], y[i, t], t*dt]
             row += 1
 
     return particles
@@ -47,10 +47,11 @@ sigma = 3   # μm
 particles = generate_noninteracting_particles(L, phi, sigma, dt, D, t_max)
 
 # calculating f(k, t) for every single timestep is uneeded - at large lag times you might as well space them logarithmically
-t = np.unique(np.floor(np.logspace(np.log10(dt), np.log10(t_max))))
+t = np.unique(np.floor(np.logspace(np.log10(dt), np.log10(t_max/2))))
 
 # prepare the data
 particles_at_frame, times_at_frame = scattering_functions.get_particles_at_frame('F', particles, dimension=2)
+print('times at frame', times_at_frame)
 
 # do the calculation
 results = scattering_functions.intermediate_scattering(
@@ -82,15 +83,20 @@ ax_f.set_xlabel('$t$ (s)')
 ax_f.set_ylabel('$f(k, t)$')
 
 # f(k, t) = exp( -D k^t t )
-# we inverse this at t = dt to get D(k)
-D_meas = - np.log(f[1, :]) / ( k[1, :]**2 * dt)
-ax_D.scatter(k[1, :], D_meas)
+# we inverse this at t = t[1] to get D(k)
+D_meas = - np.log(f[1, :]) / ( k[1, :]**2 * t[1])
+ax_D.scatter(k[1, :], D_meas, label=f'$D(k, {t[1]}\mathrm{{s}})$')
+# we could also do the inversion at a different time point
+time_index = 10
+D_meas = - np.log(f[time_index, :]) / ( k[time_index, :]**2 * t[time_index])
+ax_D.scatter(k[time_index, :], D_meas, label=f'$D(k, {t[time_index]}\mathrm{{s}})$')
 
 ax_D.set_ylabel('$D$ (μm²/s)')
 ax_D.set_xlabel('$k$ (1/μm)')
 ax_D.set_ylim(0, 2*D)
 ax_D.semilogx()
-ax_D.hlines(D, k.min(), k.max(), color='grey')
+ax_D.hlines(D, k.min(), k.max(), color='grey', label='input $D$')
+ax_D.legend()
 
 fig.tight_layout()
 fig.savefig('example.png')
