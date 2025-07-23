@@ -40,7 +40,7 @@ The main entry point, `scattering_functions.intermediate_scattering` has the fol
 | ---------- | ----------- |
 | F          | $F(k, t)$, with the radial average over $k$ vectors with the same magnitude taken. Array of shape len(d_frames) * (num k points) |
 | F_unc      | uncertainty on `F`. It is the standard error over the different time origins used for each $t$ point. Same shape as `F` |
-| k          | $k$ values, with the same shape as `F`. Note that every row is therefore identical |
+| k          | $k$ values  |
 | F_full     | this is $F(\vec{k}, t)$ before the radial average is taken. Array of shape len(d_frames) * (num k points x) * (num k points y) |
 | F_unc_full | uncertainty on `F_full`. Same shape as `F_full` |
 | k_full     | $k$ values for `F_full`. Same shape as `F_full` |

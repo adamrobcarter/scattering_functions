@@ -211,7 +211,7 @@ def intermediate_scattering(
     F    = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
     F_unc = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
     # print(f'F size {common.arraysize(Fs)}')
-    k   = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
+    k   = np.full((num_k_bins), np.nan, dtype=np.float32)
 
     F_full     = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
     F_unc_full = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
@@ -255,7 +255,8 @@ def intermediate_scattering(
         
         F   [t_i, :] = F_
         F_unc[t_i, :] = F_unc_
-        k   [t_i, :] = k_
+        if t_i == 0:
+            k[:] = k_ # k is the same from all iterations so we only save it on the first
         F_full    [t_i, :, :] = F_unbinned
         F_unc_full[t_i, :, :] = F_unc_unbinned
         k_full    [t_i, :, :] = k_unbinned
@@ -331,6 +332,7 @@ def intermediate_scattering_preprocess_run_postprocess(k_x, k_y, k_bins, func, w
     # there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
 
     k_unbinned, F_unbinned = func(particles[0], particles[1], k_x, k_y, window_func)
+    # func is probably intermediate_scattering_internal
     
     assert np.isnan(F_unbinned).sum() <= 1, f'F was {np.isnan(F_unbinned).sum()/F_unbinned.size*100:.0f}% NaN'
     # one nan point is allowed at k=(0, 0)
@@ -339,13 +341,17 @@ def intermediate_scattering_preprocess_run_postprocess(k_x, k_y, k_bins, func, w
     return k_binned, F_binned, k_unbinned, F_unbinned
 
 def postprocess_scattering(k, F, k_bins):
-    # any nan points in f we remove, and we remove them from k too. These nans are the ones we set during the calculation
+    # this is where we do the angular average over k space
+    # k and F are shape (num k points x) * (num k points y)
+
     F_flat = F.flatten()
     k_flat = k.flatten()
-    nans = np.isnan(F_flat) # where do we expect nans and why?
+
+    # there should be just one nan value at k_x == k_y == 0
+    nans = np.isnan(F_flat)
+    assert nans.sum() == 1 # apparently there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
 
     assert np.isfinite(k_flat).all()
-    # assert np.any(F_flat > 0.001)
 
     # we should probably filter out points at k > k_bins[max] 
     

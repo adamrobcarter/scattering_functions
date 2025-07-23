@@ -74,7 +74,7 @@ k = results.k
 F = results.F
 f = F[:, :] / F[0, :] # f(k, t) = F(k, t) / S(k)  note S(k) = F(k, 0)
 
-for k_index in range(results.k.shape[1]):
+for k_index in range(results.k.size):
     ax_f.plot(t[1:], f[1:, k_index])
     # don't plot the t=0 time point because it looks strange in semilogx
 
@@ -84,12 +84,12 @@ ax_f.set_ylabel('$f(k, t)$')
 
 # f(k, t) = exp( -D k^t t )
 # we inverse this at t = t[1] to get D(k)
-D_meas = - np.log(f[1, :]) / ( k[1, :]**2 * t[1])
-ax_D.scatter(k[1, :], D_meas, label=f'$D(k, {t[1]}\mathrm{{s}})$')
+D_meas = - np.log(f[1, :]) / ( k**2 * t[1])
+ax_D.scatter(k, D_meas, label=f'$D(k, {t[1]}\mathrm{{s}})$')
 # we could also do the inversion at a different time point
 time_index = 10
-D_meas = - np.log(f[time_index, :]) / ( k[time_index, :]**2 * t[time_index])
-ax_D.scatter(k[time_index, :], D_meas, label=f'$D(k, {t[time_index]}\mathrm{{s}})$')
+D_meas = - np.log(f[time_index, :]) / ( k**2 * t[time_index])
+ax_D.scatter(k, D_meas, label=f'$D(k, {t[time_index]}\mathrm{{s}})$')
 
 ax_D.set_ylabel('$D$ (μm²/s)')
 ax_D.set_xlabel('$k$ (1/μm)')
