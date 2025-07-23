@@ -26,13 +26,13 @@ The main entry point, `scattering_functions.intermediate_scattering` has the fol
 | max_k              |         | the maximum k value to calculate to |
 | num_k_bins         | 50      | the returned $k$ points will be logarithmically spaced between `min_k` and `max_k` with this many points. The logarithmically spaced points will be quantised to the nearest multiple of `min_k`. Note that this may result in fewer points being returned than requested, if two logarithmically spaced points get quantised to the same multiple of `min_k` |
 | use_doublesided_k  | False   | The section of $k$-space for $k_y < 0$ is redundant as it's an exact copy of the $k_y > 0$ space rotated around the origin. If set to true, calculate over the entire $k$-space anyway |
-| d_frames           |         | The
+| t                  |         | The time points you would like to calculate $f(k, t)$ at
 | cores              |         | if >1, the computation will run with the selected number of cores (via multiprocessing) |
 | particles_at_frame |         | the particle coordinates - see `get_particles_at_frame` below |
 | times_at_frame     |         | a 1D array of timesteps in the data - see `get_particles_at_frame` below |
-| max_time_origins   |         | maximum number of time origins to average over. The actual number of time origins averaged over may be lower if there are fewer frames with time difference `d_frame[i]` in the dataset |
+| max_time_origins   |         | maximum number of time origins to average over. The actual number of time origins averaged over may be lower if there are fewer frames with time difference `t[i]` in the dataset |
 
-`scattering_functions.intermediate_scattering` requires the particle coordinates to be in a specific format - an array of shape (number of timesteps) * (max number of particles per frame) * ($x$, $y$). `scattering_functions.get_particles_at_frame` converts an array of rows of $(x, y, t)$ coordinates (as output from TrackPy) to this format. It has parameters `F_type` which should be `'F'` for calculating $F(k, t)$, `particles`, which should be the TrackPy output array, and `dimension`. The time coordinate of the `particles` array does not have to be integer nor evenly spaced. It returns `particles_at_frame` and  `times_at_frame` for use with `scattering_functions.intermediate_scattering`.
+`scattering_functions.intermediate_scattering` requires the particle coordinates to be in a specific format - an array of shape (number of timesteps) * (max number of particles per frame) * ($x$, $y$). `scattering_functions.get_particles_at_frame` converts an array of rows of $(x, y, t)$ coordinates (as output from TrackPy) to this format. It has parameters `F_type` which should be `'F'` for calculating $F(k, t)$, `particles`, which should be the TrackPy output array, and `dimension` which should be 2 if you're in 2D. The time coordinate of the `particles` array does not have to be integer nor evenly spaced. It returns `particles_at_frame` and  `times_at_frame` for use with `scattering_functions.intermediate_scattering`. See example.py for more.
 
 `scattering_functions.intermediate_scattering` returns an object with the following properties
 
