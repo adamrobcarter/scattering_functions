@@ -241,6 +241,7 @@ def intermediate_scattering(
     # this is so if there are no frames with a certain dt, we can raise the error before the calculation starts
     # which is a lot less anoying than it failing halfway through
     pairs_at_t = []
+    assert times_at_frame.dtype == t.dtype, "times_at_frame and t must be the same dtype"
     for t_i in range(len(t)):
         pairs = get_frames_with_delta_t(times_at_frame, t[t_i])
         assert len(pairs)
