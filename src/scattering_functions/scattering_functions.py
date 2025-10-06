@@ -43,10 +43,10 @@ def get_frames_with_delta_t(t, dt):
     assert np.isfinite(pairs).all()
     return pairs
 
-def get_particles_at_frame(F_type, particles, dimension):
+def get_particles_at_frame(F_type, particles, columns):
     assert particles.dtype == np.float32
 
-    time_column = dimension
+    time_column = columns['t']
 
     # data is x,y,t
     particles[:, time_column] -= particles[:, time_column].min() # convert time to being 0-based
@@ -138,12 +138,13 @@ def get_particles_at_frame(F_type, particles, dimension):
 
     else:
         # for F (not self), we don't need the ID, so we just provide a list of particles
-        # some datasets may already have the ID in column 4, so we only select the first 3 columns
-        # however this operation is memory-expensive for very large datasets
-        if particles.size > 18e8:
-            assert particles.shape[1] == dimension+1
-        else:
-            particles = particles[:, :dimension+1]
+        # some datasets may already have the ID in column 4, so we only select the x,y,t columns
+        particles = particles[:, [columns['x'], columns['y'], time_column]]
+        # but in doing that, we changed the column indexes
+        columns['x'] = 0
+        columns['y'] = 1
+        columns['t'] = 2
+        time_column = 2
 
         # this does what the below does but just slower
         # note this may be out of date since the discontinuous times update
@@ -159,7 +160,7 @@ def get_particles_at_frame(F_type, particles, dimension):
         # we add extra nan rows such that each timestep has the same number of rows
 
         num_extra_rows = (max_particles_at_frame - num_particles_at_frame).sum()
-        extra_rows = np.full((num_extra_rows, dimension+1), np.nan, dtype=particles.dtype)
+        extra_rows = np.full((num_extra_rows, 3), np.nan, dtype=particles.dtype)
         assert extra_rows.size < 0.2 * particles.size, f'extra_rows.size = {extra_rows.size}, particles.size = {particles.size}'
         
         num_rows_added = 0
@@ -173,23 +174,25 @@ def get_particles_at_frame(F_type, particles, dimension):
         # then by sorting and reshaping, we can get the structure we want
         all_rows = all_rows[all_rows[:, time_column].argsort()]
         # all_rows.view('f4,f4,f4').sort(order=['f2'], axis=0) # this is a way of sorting the array by the 3rd (f2) column in place, saves loads of ram but takes much longer
-        particles_at_frame = all_rows.reshape((num_timesteps, max_particles_at_frame, dimension+1))
+        particles_at_frame = all_rows.reshape((num_timesteps, max_particles_at_frame, 3))
         del all_rows
         # now remove the time column, leaving just x and y
-        particles_at_frame = particles_at_frame[:, :, [0, 1]]
+        particles_at_frame = particles_at_frame[:, :, [columns['x'], columns['y']]]
 
     assert particles_at_frame.shape[0] == times.shape[0]
     assert np.isfinite(times).all()
 
+    times = times.astype(np.int64) # was getting weird errors about this - note that issue Ryker flagged about the times_at_frame dtype
+
     return particles_at_frame, times
 
 def intermediate_scattering(
-        F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_k, min_k, cores,
+        F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_k, min_k, cores=1,
         use_doublesided_k=False, Lx=None, Ly=None, window=None, quiet=False,
     ):
     assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
-    assert 0 in t, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
+    assert 0 in t, 'you need 0 in t in order to calculate S(k) for the normalisation'
     assert max(t) < len(particles_at_frame), f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}.'
 
     t = np.array(t) # (possible) list to ndarray
@@ -204,9 +207,9 @@ def intermediate_scattering(
     min_process_ram = min_process_size*particles_at_frame.itemsize
     total_ram = min_process_ram * cores
     if not quiet: print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB, min total RAM: {total_ram/1e9:.1f}GB') # should be 7 GB
-    assert total_ram < 60e9
+    # assert total_ram < 60e9, f'total RAM usage about {total_ram/1e9:.0f}GB ({cores} cores)'
     if total_ram > 20e9:
-        warnings.warn(f'total RAM usage about {total_ram/1e9:.0f}GB')
+        warnings.warn(f'total RAM usage about {total_ram/1e9:.0f}GB ({cores} cores)')
 
     F    = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
     F_unc = np.full((len(t), num_k_bins), np.nan, dtype=np.float32)
@@ -241,7 +244,7 @@ def intermediate_scattering(
     # this is so if there are no frames with a certain dt, we can raise the error before the calculation starts
     # which is a lot less anoying than it failing halfway through
     pairs_at_t = []
-    assert times_at_frame.dtype == t.dtype, "times_at_frame and t must be the same dtype"
+    assert times_at_frame.dtype == t.dtype, f"times_at_frame ({times_at_frame.dtype}) and t ({t.dtype}) must be the same dtype "
     for t_i in range(len(t)):
         pairs = get_frames_with_delta_t(times_at_frame, t[t_i])
         assert len(pairs)
