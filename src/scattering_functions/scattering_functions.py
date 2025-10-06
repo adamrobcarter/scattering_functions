@@ -45,6 +45,7 @@ def get_frames_with_delta_t(t, dt):
 
 def get_particles_at_frame(F_type, particles, columns):
     assert particles.dtype == np.float32
+    assert isinstance(columns, dict), f'type(columns) == {type(columns)}'
 
     time_column = columns['t']
 

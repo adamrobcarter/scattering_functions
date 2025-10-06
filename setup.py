@@ -16,5 +16,5 @@ setup(
     license=license,
     packages=find_packages(where="src"),
     package_dir={"": "src"},
-    install_requires=["numpy", "scipy", "tqdm"],
+    install_requires=["numpy", "scipy", "tqdm", "numba"],
 )

@@ -3,3 +3,4 @@ scattering_functions.egg-info
 scattering_functions/__pycache__/*
 example.png
 build/
+src/scattering_functions/__pycache__/*
