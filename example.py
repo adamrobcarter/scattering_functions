@@ -53,7 +53,7 @@ t = np.unique(np.floor(np.logspace(np.log10(dt), np.log10(t_max/2))))
 particles_at_frame, times_at_frame = scattering_functions.get_particles_at_frame('F', particles, columns={
     'x': 0,
     'y': 1,
-    'z': 2,
+    't': 2,
 })
 print('times at frame', times_at_frame)
 
