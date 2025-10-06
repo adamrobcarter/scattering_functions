@@ -140,10 +140,12 @@ def get_particles_at_frame(F_type, particles, dimension):
         # for F (not self), we don't need the ID, so we just provide a list of particles
         # some datasets may already have the ID in column 4, so we only select the first 3 columns
         # however this operation is memory-expensive for very large datasets
-        if particles.size > 18e8:
-            assert particles.shape[1] == dimension+1
-        else:
-            particles = particles[:, :dimension+1]
+        # if particles.size > 18e8:
+        #     assert particles.shape[1] == dimension+1
+        # else:
+        #     particles = particles[:, :dimension+1]
+        # update: i cba, let's just try
+        particles = particles[:, :dimension+1]
 
         # this does what the below does but just slower
         # note this may be out of date since the discontinuous times update
@@ -190,7 +192,9 @@ def intermediate_scattering(
     assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
     assert 0 in t, 'you need 0 in d_frames in order to calculate S(k) for the normalisation'
-    assert max(t) < len(particles_at_frame), f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}.'
+    if max(t) > len(particles_at_frame):
+        t = t[t < len(particles_at_frame)]
+        warnings.warn(f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}. I removed down to {max(t)}.')
 
     t = np.array(t) # (possible) list to ndarray
     num_timesteps = times_at_frame.size
@@ -202,9 +206,16 @@ def intermediate_scattering(
 
     min_process_size = (k_x.size * k_y.size * particles_at_frame[0, :, 0].size) + (k_x.size * k_y.size * particles_at_frame[0, :, 1].size)
     min_process_ram = min_process_size*particles_at_frame.itemsize
-    total_ram = min_process_ram * cores
-    if not quiet: print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB, min total RAM: {total_ram/1e9:.1f}GB') # should be 7 GB
+    if not quiet: print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB')
+
+    while (total_ram := min_process_ram * cores) > 60e9:
+        if cores == 1:
+            raise Exception('even with just 1 core, the total RAM was still over 60GB')
+        cores = int(cores/2)
+
     assert total_ram < 60e9
+
+    if not quiet: print(f'min total RAM: {total_ram/1e9:.1f}GB')
     if total_ram > 20e9:
         warnings.warn(f'total RAM usage about {total_ram/1e9:.0f}GB')
 
@@ -268,8 +279,8 @@ def intermediate_scattering(
 
     assert np.any(F > 0.001)
 
-    Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_x', 'k_y'])
-    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_x=k_y, k_y=k_y)
+    Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_x', 'k_y', 'd_frames'])
+    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_x=k_y, k_y=k_y, d_frames=t)
 
 def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at_frame, k_x, k_y, k_bins, pool, progress, window_func, pairs):
     assert particles_at_frame.dtype == np.float32

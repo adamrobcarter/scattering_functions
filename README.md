@@ -47,6 +47,9 @@ The main entry point, `scattering_functions.intermediate_scattering` has the fol
 | k_x        | $k$ values used to create the grid in the x direction |
 | k_y        | $k$ values used to create the grid in the y direction |
 
+## MSD
+The library also includes code to calculate the mean squared displacement (MSD), in `scattering_functions.msd.calc_incremental`
+
 
 ## Support
 This code is very much pre-release and is liable to change at any time. If the code would be helpful to you, feel free to contact me (adam.rob.carter@gmail.com) while the documentation is limited.
