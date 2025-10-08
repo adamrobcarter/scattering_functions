@@ -198,7 +198,9 @@ def intermediate_scattering(
     if max(t) > len(particles_at_frame):
         t = t[t < len(particles_at_frame)]
         warnings.warn(f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}. I removed down to {max(t)}.')
-
+    
+    assert len(t) > 1
+    
     t = np.array(t) # (possible) list to ndarray
     num_timesteps = times_at_frame.size
 
