@@ -195,13 +195,15 @@ def intermediate_scattering(
     assert np.isfinite(times_at_frame).all()
 
     assert 0 in t, 'you need 0 in t in order to calculate S(k) for the normalisation'
+    t = np.array(t) # (possible) list to ndarray
+    # t is actually frame count not time right?!
+
     if max(t) > len(particles_at_frame):
         t = t[t < len(particles_at_frame)]
         warnings.warn(f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}. I removed down to {max(t)}.')
     
-    assert len(t) > 1
+    assert t.size > 1
     
-    t = np.array(t) # (possible) list to ndarray
     num_timesteps = times_at_frame.size
 
     k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_doublesided_k=use_doublesided_k)
@@ -356,19 +358,21 @@ def intermediate_scattering_preprocess_run_postprocess(k_x, k_y, k_bins, func, w
     assert np.isnan(F_unbinned).sum() <= 1, f'F was {np.isnan(F_unbinned).sum()/F_unbinned.size*100:.0f}% NaN'
     # one nan point is allowed at k=(0, 0)
     
-    k_binned, F_binned = postprocess_scattering(k_unbinned, F_unbinned, k_bins)
+    k_binned, F_binned = angular_average(k_unbinned, F_unbinned, k_bins)
     return k_binned, F_binned, k_unbinned, F_unbinned
 
-def postprocess_scattering(k, F, k_bins):
+def angular_average(k, F, k_bins):
     # this is where we do the angular average over k space
     # k and F are shape (num k points x) * (num k points y)
+
+    assert np.all(k.shape == F.shape), f'k.shape = {k.shape}, F.shape = {F.shape}'
 
     F_flat = F.flatten()
     k_flat = k.flatten()
 
     # there should be just one nan value at k_x == k_y == 0
     nans = np.isnan(F_flat)
-    assert nans.sum() == 1 # apparently there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
+    assert nans.sum() <= 1, f'nans.sum() = {nans.sum()}' # apparently there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
 
     assert np.isfinite(k_flat).all()
 
