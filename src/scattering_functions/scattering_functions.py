@@ -195,7 +195,7 @@ def intermediate_scattering(
     assert np.isfinite(times_at_frame).all()
 
     assert 0 in t, 'you need 0 in t in order to calculate S(k) for the normalisation'
-    t = np.array(t) # (possible) list to ndarray
+    t = np.array(t, dtype=times_at_frame.dtype) # (possible) list to ndarray
     # t is actually frame count not time right?!
 
     if max(t) > len(particles_at_frame):
@@ -290,7 +290,7 @@ def intermediate_scattering(
     assert np.any(F > 0.001)
 
     Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_x', 'k_y', 'd_frames'])
-    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_x=k_y, k_y=k_y, d_frames=t)
+    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_x=k_x, k_y=k_y, d_frames=t)
 
 def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at_frame, k_x, k_y, k_bins, pool, progress, window_func, pairs):
     assert particles_at_frame.dtype == np.float32
