@@ -104,3 +104,30 @@ ax_D.legend()
 
 fig.tight_layout()
 fig.savefig('example.png')
+
+
+### plot a heatmat of F(k, t) over kx and ky at one specific time value
+fig_heatmap, ax_heatmap = plt.subplots(1, 1, figsize=(4, 4))
+
+results = scattering_functions.intermediate_scattering(
+    F_type             = 'F',
+    particles_at_frame = particles_at_frame,
+    times_at_frame     = times_at_frame,
+    t                  = [0, t_max/10],
+    max_k              = 10,
+    min_k              = (2*np.pi/L, 2*np.pi/L),
+    num_k_bins         = 50,
+    max_time_origins   = 50,
+    cores              = 16,
+    use_doublesided_k  = True # normally we ignore half of the k-space due to symmetry, but for a heatmap we want the full space
+)
+
+# x = np.concatenate((-results.k_x[::-1], [0], results.k_x))
+# y = np.concatenate((-results.k_y[::-1], [0], results.k_y))
+
+x = results.k_x 
+y = results.k_y
+
+print(x.shape, y.shape, results.F_full.shape)
+ax_heatmap.pcolormesh(x, y, results.F_full[1, :, :], shading='nearest')
+fig_heatmap.savefig('example_heatmap.png')
