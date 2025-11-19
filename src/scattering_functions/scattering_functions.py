@@ -183,7 +183,8 @@ def get_particles_at_frame(F_type, particles, columns):
     assert particles_at_frame.shape[0] == times.shape[0]
     assert np.isfinite(times).all()
 
-    times = times.astype(np.int64) # was getting weird errors about this - note that issue Ryker flagged about the times_at_frame dtype
+    # times = times.astype(np.int64) # was getting weird errors about this - note that issue Ryker flagged about the times_at_frame dtype
+    # ^ this is a bad idea, you can have non-integer times! why was this here?
 
     return particles_at_frame, times
 
