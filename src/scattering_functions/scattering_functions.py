@@ -194,6 +194,7 @@ def intermediate_scattering(
     ):
     assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
+    assert len(min_k) == 2
 
     assert 0 in t, 'you need 0 in t in order to calculate S(k) for the normalisation'
     t = np.array(t, dtype=times_at_frame.dtype) # (possible) list to ndarray
