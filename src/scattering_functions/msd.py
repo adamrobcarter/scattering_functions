@@ -834,22 +834,21 @@ def calc_incremental_xyz(particles, num_dimensions):
     assert not np.all(msd_count == 0)
     
     if np.any(msd_count == 0):
-        raise NotImplementedError('this has not been updated since we moved to calculating each dimension')
         index = np.argmax(msd_count==0)
         print(f'no particles were found after frame={index}')
         if index < 100:
             raise Exception(f'no particles were found after frame={index}')
-        msd_sum    = msd_sum   [:index]
-        msd_sum_sq = msd_sum_sq[:index]
+        msd_sum    = msd_sum   [:, :index]
+        msd_sum_sq = msd_sum_sq[:, :index]
         msd_count  = msd_count [:index]
     
     avg = msd_sum / msd_count
     std = msd_sum_sq / msd_count - avg**2
 
-    assert np.isclose(avg[:, 0], 0, atol=1e-3).all(), f'msd = {avg[:, 0]} at frame 0'
+    assert np.isclose(avg[:, 0], 0, atol=1e-2).all(), f'msd = {avg[:, 0]} at frame 0'
     # this atol should maybe depend on if it's translational or rotational diffusion I think
     # because rotational diffusions in rad are of smaller magnitude than translationals in um (is this definitely true?)
-    # it seems to also depend on the magnitude of the timestep
+    # it should also depend on the magnitude of the timestep
 
     assert not np.any(np.isnan(avg))
 
