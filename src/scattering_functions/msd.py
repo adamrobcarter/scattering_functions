@@ -743,7 +743,9 @@ def calc_incremental_xyz(particles, num_dimensions):
     assert np.all(np.diff(np.unique(particles[:, time_column])) == 1), 'times seems to be non-contignous'
 
     # need the data are sorted by particle ID
+    print('sorting')
     particles = particles[particles[:, id_column].argsort()]
+    print('sorted')
     
     num_particles = int(particles[:, id_column].max()) + 1
     num_timesteps = int(particles[:, time_column].max()) + 1

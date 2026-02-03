@@ -95,11 +95,8 @@ def test_noninteracting(noninteracting_particles):
         # don't plot the t=0 time point because it looks strange in semilogx
 
         if k_index > 0: # idk why the first one fails but whatever
-            for t_index in range(1, len(t)):
-                if t[t_index] > t_max / 10:
-                    continue # at large times the noise is too high to be meaningful
-                assert np.isclose(simulation[t_index-1], theory[t_index-1], atol=0.1), f'simulation f({k[k_index]}, {t[t_index]}) = {simulation[t_index-1]} != {theory[t_index-1]} does not match theory'
-        
+            np.testing.assert_allclose(simulation[t[1:] < t_max/10], theory[t[1:] < t_max/10], atol=0.1)
+            # we only test small times because at large times the noise is too high to be meaningful
 
     ax.semilogx()
     ax.set_xlabel('$t$ (s)')

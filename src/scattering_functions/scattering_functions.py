@@ -360,32 +360,46 @@ def intermediate_scattering_preprocess_run_postprocess(k_x, k_y, k_bins, func, w
     assert np.isnan(F_unbinned).sum() <= 1, f'F was {np.isnan(F_unbinned).sum()/F_unbinned.size*100:.0f}% NaN'
     # one nan point is allowed at k=(0, 0)
     
-    k_binned, F_binned = angular_average(k_unbinned, F_unbinned, k_bins)
+    k_binned, F_binned, F_unc = angular_average(k_unbinned, F_unbinned, k_bins)
     return k_binned, F_binned, k_unbinned, F_unbinned
 
 def angular_average(k, F, k_bins):
+    """
+    Given 2D arrays k and F(k), take an angular average of F, returning points at the given k_bins
+    
+    :param k: np.ndarray
+    :param F: np.ndarray
+    :param k_bins: np.ndarray
+
+    :return: k_binned, F_binned, F_unc: the binned k values, F values, and standard error on F
+    """
+
     # this is where we do the angular average over k space
     # k and F are shape (num k points x) * (num k points y)
 
     assert np.all(k.shape == F.shape), f'k.shape = {k.shape}, F.shape = {F.shape}'
 
+    # assert np.nanmin(k) > np.min(k_bins), f'k min {np.nanmin(k)} < k_bins min {np.min(k_bins)}'
+    # assert np.nanmax(k) < np.max(k_bins), f'k max {np.nanmax(k)} > k_bins max {np.max(k_bins)}'
+
     F_flat = F.flatten()
     k_flat = k.flatten()
+    assert np.isfinite(k_flat).all()
 
-    # there should be just one nan value at k_x == k_y == 0
     nans = np.isnan(F_flat)
     assert nans.sum() <= 1, f'nans.sum() = {nans.sum()}' # apparently there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
 
-    assert np.isfinite(k_flat).all()
 
     # we should probably filter out points at k > k_bins[max] 
     
     assert np.all(k_flat[~nans] >= k_bins[0] ), f'k_flat[~nans].min() = {k_flat[~nans].min()}, k_bins[0] = {k_bins[0]}'
     
-    F_binned, _, _ = scipy.stats.binned_statistic(k_flat[~nans], F_flat[~nans], 'mean', bins=k_bins)
-    k_binned, _, _ = scipy.stats.binned_statistic(k_flat[~nans], k_flat[~nans], 'mean', bins=k_bins)
+    F_binned,  _, _ = scipy.stats.binned_statistic(k_flat[~nans], F_flat[~nans], 'mean',  bins=k_bins)
+    F_std,     _, _ = scipy.stats.binned_statistic(k_flat[~nans], F_flat[~nans], 'std',   bins=k_bins)
+    bin_count, _, _ = scipy.stats.binned_statistic(k_flat[~nans], F_flat[~nans], 'count', bins=k_bins)
+    k_binned,  _, _ = scipy.stats.binned_statistic(k_flat[~nans], k_flat[~nans], 'mean',  bins=k_bins)
 
-    assert np.isfinite(k_binned).sum() / k_binned.size > 0.5, f'k_binned finite: {np.isfinite(k_binned).sum()/k_binned.size}'
+    assert np.isfinite(k_binned).sum() / k_binned.size >= 0.5, f'k_binned finite: {np.isfinite(k_binned).sum()/k_binned.size}'
     
     # ^^ we used to use the middle of the bin, but this will be slightly skewed for small k, so we do a proper average
     # binned statistic returns NaN if the bin is empty
@@ -396,8 +410,18 @@ def angular_average(k, F, k_bins):
     assert np.isfinite(k_binned).all()
 
     assert np.isnan(F_binned).sum() < F_binned.size
+    
+    # scipy.stats.binned_statistic: Empty bins will be represented by NaN.
+    # if it's just the first bin, imma remove it
+    # if bin_count[0] == 0:
+    #     k_binned = k_binned[1:]
+    #     F_binned = F_binned[1:]
 
-    return k_binned, F_binned
+    # assert np.isfinite(F_binned).all(), f'F_binned nans: {np.isnan(F_binned).sum()} of {F_binned.size}'
+
+    F_unc = F_std / np.sqrt(bin_count)
+
+    return k_binned, F_binned, F_unc
 
 def quantise(values, min_k):
     # return values with each element replaced by the closest multiple of min_k
