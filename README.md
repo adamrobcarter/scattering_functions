@@ -11,11 +11,11 @@ Clone the repository somewhere, and run `pip install -e .`. Dependencies are num
 Now you should be able to do `import scattering_functions` in python. See `example.py` for more.
 
 ## Details
-The code calculates
+The code calculates $F(\vec{k}, t)$ over a grid of points in 2D $k$-space via the "direct method":
 ```math
-F(k, t) = \frac1N \sum_\mu \sum_\nu \langle \exp(-i\vec{k} \cdot [\vec{r_\mu}(t + t_0) - \vec{r_\nu}(t_0)]) \rangle
+F(\vec{k}, t) = \frac1N \sum_\mu \sum_\nu \langle \exp(-i\vec{k} \cdot [\vec{r_\mu}(t + t_0) - \vec{r_\nu}(t_0)]) \rangle
 ```
-where $\vec{r_\mu}(t)$ are particle coordinates at time $t$ and the angle brackets indicate an average over \textit{time origins} $t_0$
+where $\vec{r_\mu}(t)$ are particle coordinates at time $t$ and the angle brackets indicate an average over \textit{time origins} $t_0$. Subsequently, an angular average is performed to obtain F(k, t) over binned magnitudes of the $k$-space points.
 
 The main entry point, `scattering_functions.intermediate_scattering` has the following parameters
 
