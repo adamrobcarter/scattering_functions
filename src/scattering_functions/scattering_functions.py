@@ -463,6 +463,14 @@ def get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_dou
 
     return k_x, k_y, bin_edges
 
+def k_xs_ys_to_pairs(k_xs, k_ys):
+    k_pairs = np.full((k_xs.size * k_ys.size, 2), np.nan)
+    for i in range(k_xs.size):
+        for j in range(k_ys.size):
+            k_pairs[i*k_ys.size + j, 0] = k_xs[i]
+            k_pairs[i*k_ys.size + j, 1] = k_ys[j]
+    return k_pairs
+
 def blackman_harris_window(Lx, Ly, x, y):
     # Giavazzi, F., Edera, P., Lu, P.J. et al. Image windowing mitigates edge effects in Differential Dynamic Microscopy
     # https://link.springer.com/article/10.1140/epje/i2017-11587-3
