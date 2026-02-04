@@ -480,6 +480,17 @@ def no_window(x, y):
     return np.ones_like(x)
 
 def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, window_func):
+    """
+    Calculate 1/N sum_mu sum_nu exp( i k . (r_mu(t1) - r_nu(t0)) )
+    
+    :param particles_t0: 2 * N array of x,y positions at time t0
+    :param particles_t1: 2 * N array of x,y positions at time t1
+    :param k_x: 1D array of k values in the x direction
+    :param k_y: 1D array of k values in the y direction
+    :param window_func: function that takes x and y coordinates and returns window weights
+
+    :return: k, f: 2D array of k magnitudes, and corresponding F(k)
+    """
 
     assert k_x.dtype == np.float32, f'k_x.dtype = {k_x.dtype}'
     assert particles_t0.dtype == np.float32, f'particles_t0.dtype = {particles_t0.dtype}'
