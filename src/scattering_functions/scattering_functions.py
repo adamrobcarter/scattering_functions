@@ -192,6 +192,9 @@ def intermediate_scattering(
         F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_k, min_k, cores=1,
         use_doublesided_k=False, Lx=None, Ly=None, window=None, quiet=False,
     ):
+    """
+    particles_at_frame: an array of shape (number of timesteps) * (max number of particles per frame) * (2)
+    """
     assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
     assert len(min_k) == 2
@@ -204,7 +207,7 @@ def intermediate_scattering(
         t = t[t < len(particles_at_frame)]
         warnings.warn(f'You have {len(particles_at_frame)} frames, so the max d_frame you can calculate is {len(particles_at_frame)-1}. max(d_frames) was {max(t)}. I removed down to {max(t)}.')
     
-    assert t.size > 1
+    # assert t.size > 1 # not if you just want to calculate S(k) from one timestep
     
     num_timesteps = times_at_frame.size
 
@@ -373,6 +376,8 @@ def angular_average(k, F, k_bins):
 
     :return: k_binned, F_binned, F_unc: the binned k values, F values, and standard error on F
     """
+    assert isinstance(k, np.ndarray), f'k is type {type(k)}'
+    assert isinstance(F, np.ndarray), f'F is type {type(F)}'
 
     # this is where we do the angular average over k space
     # k and F are shape (num k points x) * (num k points y)
@@ -431,23 +436,32 @@ def quantise(values, min_k):
     quantised = np.unique(quantised)
     return quantised
 
-def get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_doublesided_k=False):
+def get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_doublesided_k=False, dimension=2):
+    assert dimension in [2, 3]
+    if np.isscalar(min_k):
+        min_k = np.array([min_k]*dimension, dtype=np.float32)
+    else:
+        assert len(min_k) == dimension, f'len(min_k) = {len(min_k)}, but dimension = {dimension}'
+
     # only allowed k values are multiples of min_k
     # but we want log-spaced values
     k_oneside_x = np.logspace(np.log10(min_k[0]), np.log10(max_k), num_k_bins, dtype=np.float32)
     # so we take log-spaced values and move them to the nearest multiple of min_k
     k_oneside_x = quantise(k_oneside_x, min_k[0])
+    k_x = np.concatenate([-k_oneside_x[::-1], (0,), k_oneside_x], dtype=np.float32)
     
     k_oneside_y = np.logspace(np.log10(min_k[1]), np.log10(max_k), num_k_bins, dtype=np.float32)
     k_oneside_y = quantise(k_oneside_y, min_k[1])
-
-    k_x = np.concatenate([-k_oneside_x[::-1], (0,), k_oneside_x], dtype=np.float32)
-
     if use_doublesided_k:
         k_y = np.concatenate([-k_oneside_y[::-1], (0,), k_oneside_y], dtype=np.float32)
-
     else:
         k_y = np.concatenate([(0,), k_oneside_y], dtype=np.float32)
+    
+    if dimension == 3:
+        k_oneside_z = np.logspace(np.log10(min_k[2]), np.log10(max_k), num_k_bins, dtype=np.float32)
+        k_oneside_z = quantise(k_oneside_z, min_k[2])
+        k_z = np.concatenate([-k_oneside_z[::-1], (0,), k_oneside_z], dtype=np.float32)
+
 
     bin_edges = np.concatenate([(0,), k_oneside_x], dtype=np.float32)
 
@@ -460,16 +474,90 @@ def get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_dou
     # there's a small problem here as we double count the points on k_x = 0 when on not doublesided mode
 
     assert k_x.dtype == np.float32, f'k_x.dtype = {k_x.dtype}'
+    
+    if dimension == 2:
+        return k_x, k_y, bin_edges
+    elif dimension == 3:
+        return k_x, k_y, k_z, bin_edges
 
-    return k_x, k_y, bin_edges
+def ks_to_pairs(k_xs, k_ys, k_zs=None):
+    """
+    convert a separate kx and ky coordinates into a list of kx, ky pairs.
+    optionally works with kz too
+    """
+    assert len(k_xs.shape) == 1
+    assert len(k_ys.shape) == 1
 
-def k_xs_ys_to_pairs(k_xs, k_ys):
-    k_pairs = np.full((k_xs.size * k_ys.size, 2), np.nan)
-    for i in range(k_xs.size):
-        for j in range(k_ys.size):
-            k_pairs[i*k_ys.size + j, 0] = k_xs[i]
-            k_pairs[i*k_ys.size + j, 1] = k_ys[j]
+    if k_zs is None:
+        k_pairs = np.full((k_xs.size * k_ys.size, 2), np.nan)
+        for i in range(k_xs.size):
+            for j in range(k_ys.size):
+                k_pairs[i*k_ys.size + j, 0] = k_xs[i]
+                k_pairs[i*k_ys.size + j, 1] = k_ys[j]
+
+    else:
+        assert len(k_zs.shape) == 1
+
+        k_pairs = np.full((k_xs.size * k_ys.size * k_zs.size, 3), np.nan)
+        for i in range(k_xs.size):
+            for j in range(k_ys.size):
+                for l in range(k_zs.size):
+                    k_pairs[i*k_ys.size * k_zs.size + j * k_zs.size + l, 0] = k_xs[i]
+                    k_pairs[i*k_ys.size * k_zs.size + j * k_zs.size + l, 1] = k_ys[j]
+                    k_pairs[i*k_ys.size * k_zs.size + j * k_zs.size + l, 2] = k_zs[l]
+
     return k_pairs
+
+def get_k_points_close_to_mag(min_k, target_k, num, dimension=2):
+    """
+    Given a magnitude target_k, return `num` points (k_x, k_y, k_z) that are close to that magnitude. Points are only in half space k_y > 0
+    you may get fewer than `num` points if there aren't enough close to that magnitude, more likely for very small k
+
+    :param min_k: should be n * 2*pi/L
+    :param target_k: k value to find points close to
+    :param num: number of points to return
+    :param dimension: return points in 2D or 3D
+    """
+    assert dimension in [2, 3], f'dimension = {dimension} not supported'
+
+    search_margin = min_k
+
+    pairs = []
+
+    # i do this by looping rather than just setting up a grid kx,ky, cause that grid could be huge for small min_k/target_k
+    # for k_x in np.arange(-target_k - search_margin, target_k + search_margin + min_k, min_k):
+    halfside_range = min_k * np.array((range(0, 1+int(np.ceil((target_k + search_margin) / min_k)))))
+    for k_x in np.concatenate((-halfside_range[1::], halfside_range)):
+        for k_y in halfside_range:
+            if dimension == 2:
+                k_z_range = [0]
+            elif dimension == 3:
+                k_z_range = np.concatenate((-halfside_range[1::], halfside_range))
+            for k_z in k_z_range:
+                k_mag = np.sqrt(k_x**2 + k_y**2 + k_z**2)
+                if k_mag == 0:
+                    continue
+                if np.abs(k_mag - target_k) <= search_margin:
+                    if dimension == 3:
+                        pairs.append((k_x, k_y, k_z))
+                    elif dimension == 2:
+                        pairs.append((k_x, k_y))
+
+    pairs = np.array(pairs)
+
+    if pairs.shape[0] > num:
+        # got too many, let's select the closest ones
+        # so sort them by distance from target_k
+        dists = np.abs(np.linalg.norm(pairs, axis=1) - target_k)
+        sorted_indices = np.argsort(dists)
+        pairs = pairs[sorted_indices[:num], :]
+
+    closest_mag = np.linalg.norm(pairs[0, :])
+    if not np.isclose(closest_mag, target_k, rtol=2):
+        warnings.warn(f'closest k magnitude found was {closest_mag:.3f}, which is not close to target_k {target_k:.3f}. You may want to decrease min_k. 2pi/min_k={2*np.pi/min_k:.0f}um')
+
+    assert pairs.shape[1] == dimension
+    return pairs
 
 def blackman_harris_window(Lx, Ly, x, y):
     # Giavazzi, F., Edera, P., Lu, P.J. et al. Image windowing mitigates edge effects in Differential Dynamic Microscopy
@@ -749,3 +837,33 @@ def self_intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y):
     k = np.sqrt(k_x**2 + k_y**2)
 
     return k, S
+
+def structure_factor(xy, min_k, max_k, num_k_bins=25):
+    """
+    this is a helper function to calculate the structure factor from pairs of x & y coordinates
+    """
+    
+    particles = np.full((xy.shape[0], 3), np.nan, dtype=np.float32)
+    particles[:, [0, 1]] = xy
+    particles[:, 2] = 0
+
+    particles_at_frame, times_at_frame = get_particles_at_frame('F', particles, columns={
+        'x': 0,
+        'y': 1,
+        't': 2,
+    })
+
+    results = intermediate_scattering(
+        F_type             = 'F',
+        particles_at_frame = particles_at_frame,
+        times_at_frame     = times_at_frame,
+        t                  = [0],
+        max_k              = max_k,
+        min_k              = min_k,
+        num_k_bins         = num_k_bins,
+        max_time_origins = 1, # this means nothing here...
+        quiet = True,
+    )
+    S = results.F[0, :]
+    k = results.k
+    return S, k
