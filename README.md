@@ -31,8 +31,9 @@ The main entry point, `scattering_functions.intermediate_scattering` has the fol
 | particles_at_frame |         | the particle coordinates - see `get_particles_at_frame` below |
 | times_at_frame     |         | a 1D array of timesteps in the data - see `get_particles_at_frame` below |
 | max_time_origins   |         | maximum number of time origins to average over. The actual number of time origins averaged over may be lower if there are fewer frames with time difference `t[i]` in the dataset |
+| dimension          | 2       | can be 2 or 3 |
 
-`scattering_functions.intermediate_scattering` requires the particle coordinates to be in a specific format - an array of shape (number of timesteps) * (max number of particles per frame) * ($x$, $y$). `scattering_functions.get_particles_at_frame` converts an array of rows of $(x, y, t)$ coordinates (as output from TrackPy) to this format. It has parameters `F_type` which should be `'F'` for calculating $F(k, t)$, `particles`, which should be the TrackPy output array, and `columns` which should be a dictionary with keys `x`, `y`, and `t` which give the indexes of the respective columns. The time coordinate of the `particles` array does not have to be integer nor evenly spaced. It returns `particles_at_frame` and  `times_at_frame` for use with `scattering_functions.intermediate_scattering`. See example.py for more.
+`scattering_functions.intermediate_scattering` requires the particle coordinates to be in a specific format - an array of shape (number of timesteps) * (max number of particles per frame) * ($x$, $y$). `scattering_functions.get_particles_at_frame` converts an array of rows of $(x, y, t)$ coordinates (as output from TrackPy) to this format. It has parameters `F_type` which should be `'F'` for calculating $F(k, t)$, `particles`, which should be the TrackPy output array, `columns` which should be a dictionary with keys `x`, `y`, and `t` which give the indexes of the respective columns, and `dimension` (2 or 3). The time coordinate of the `particles` array does not have to be integer nor evenly spaced. It returns `particles_at_frame` and  `times_at_frame` for use with `scattering_functions.intermediate_scattering`. See example.py for more.
 
 `scattering_functions.intermediate_scattering` returns an object with the following properties
 
@@ -44,8 +45,7 @@ The main entry point, `scattering_functions.intermediate_scattering` has the fol
 | F_full     | this is $F(\vec{k}, t)$ before the radial average is taken. Array of shape len(d_frames) * (num k points x) * (num k points y) |
 | F_unc_full | uncertainty on `F_full`. Same shape as `F_full` |
 | k_full     | $k$ values for `F_full`. Same shape as `F_full` |
-| k_x        | $k$ values used to create the grid in the x direction |
-| k_y        | $k$ values used to create the grid in the y direction |
+| k_arrays   | tuple of $k$ values used to create the grid in each direction |
 
 ## MSD
 The library also includes code to calculate the mean squared displacement (MSD), in `scattering_functions.msd.calc_incremental`
