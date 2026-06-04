@@ -43,13 +43,14 @@ def get_frames_with_delta_t(t, dt):
     assert np.isfinite(pairs).all()
     return pairs
 
-def get_particles_at_frame(F_type, particles, columns):
+def get_particles_at_frame(F_type, particles, columns, dimension=2):
     assert particles.dtype == np.float32
     assert isinstance(columns, dict), f'type(columns) == {type(columns)}'
 
-    time_column = columns['t']
+    if dimension == 3:
+        assert 'z' in columns, 'for 3D data, you must provide the column index for z in the columns dict'
 
-    # data is x,y,t
+    time_column = columns['t']
     particles[:, time_column] -= particles[:, time_column].min() # convert time to being 0-based
 
     # find max number of particles at any one timestep
@@ -139,13 +140,24 @@ def get_particles_at_frame(F_type, particles, columns):
 
     else:
         # for F (not self), we don't need the ID, so we just provide a list of particles
-        # some datasets may already have the ID in column 4, so we only select the x,y,t columns
-        particles = particles[:, [columns['x'], columns['y'], time_column]]
+        # some datasets may already have the ID in column 4, so we remove that
+        if dimension == 2:
+            coord_columns = [columns['x'], columns['y']]
+        elif dimension == 3:
+            coord_columns = [columns['x'], columns['y'], columns['z']]
+        particles = particles[:, [*coord_columns, time_column]]
         # but in doing that, we changed the column indexes
         columns['x'] = 0
         columns['y'] = 1
-        columns['t'] = 2
-        time_column = 2
+        if dimension == 2:
+            columns['t'] = 2
+            coord_columns = [columns['x'], columns['y']]
+        elif dimension == 3:
+            columns['z'] = 2
+            columns['t'] = 3
+            coord_columns = [columns['x'], columns['y'], columns['z']]
+
+        time_column = columns['t']
 
         # this does what the below does but just slower
         # note this may be out of date since the discontinuous times update
@@ -161,7 +173,7 @@ def get_particles_at_frame(F_type, particles, columns):
         # we add extra nan rows such that each timestep has the same number of rows
 
         num_extra_rows = (max_particles_at_frame - num_particles_at_frame).sum()
-        extra_rows = np.full((num_extra_rows, 3), np.nan, dtype=particles.dtype)
+        extra_rows = np.full((num_extra_rows, dimension+1), np.nan, dtype=particles.dtype)
         assert extra_rows.size < 0.2 * particles.size, f'extra_rows.size = {extra_rows.size}, particles.size = {particles.size}'
         
         num_rows_added = 0
@@ -175,13 +187,14 @@ def get_particles_at_frame(F_type, particles, columns):
         # then by sorting and reshaping, we can get the structure we want
         all_rows = all_rows[all_rows[:, time_column].argsort()]
         # all_rows.view('f4,f4,f4').sort(order=['f2'], axis=0) # this is a way of sorting the array by the 3rd (f2) column in place, saves loads of ram but takes much longer
-        particles_at_frame = all_rows.reshape((num_timesteps, max_particles_at_frame, 3))
+        particles_at_frame = all_rows.reshape((num_timesteps, max_particles_at_frame, dimension+1))
         del all_rows
-        # now remove the time column, leaving just x and y
-        particles_at_frame = particles_at_frame[:, :, [columns['x'], columns['y']]]
+        # now remove the time column, leaving just the coords
+        particles_at_frame = particles_at_frame[:, :, coord_columns]
 
     assert particles_at_frame.shape[0] == times.shape[0]
     assert np.isfinite(times).all()
+    assert particles_at_frame.shape[2] == dimension
 
     # times = times.astype(np.int64) # was getting weird errors about this - note that issue Ryker flagged about the times_at_frame dtype
     # ^ this is a bad idea, you can have non-integer times! why was this here?
@@ -190,14 +203,15 @@ def get_particles_at_frame(F_type, particles, columns):
 
 def intermediate_scattering(
         F_type, num_k_bins, max_time_origins, t, particles_at_frame, times_at_frame, max_k, min_k, cores=1,
-        use_doublesided_k=False, Lx=None, Ly=None, window=None, quiet=False,
+        use_doublesided_k=False, Lx=None, Ly=None, window=None, quiet=False, dimension=2,
     ):
     """
-    particles_at_frame: an array of shape (number of timesteps) * (max number of particles per frame) * (2)
+    particles_at_frame: an array of shape (number of timesteps) * (max number of particles per frame) * (dimension)
     """
     assert np.isfinite(max_k)
     assert np.isfinite(times_at_frame).all()
-    assert len(min_k) == 2
+    assert len(min_k) == dimension
+    assert particles_at_frame.shape[2] == dimension
 
     assert 0 in t, 'you need 0 in t in order to calculate S(k) for the normalisation'
     t = np.array(t, dtype=times_at_frame.dtype) # (possible) list to ndarray
@@ -211,12 +225,15 @@ def intermediate_scattering(
     
     num_timesteps = times_at_frame.size
 
-    k_x, k_y, k_bins = get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_doublesided_k=use_doublesided_k)
+    k_arrays, k_bins = get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins,
+                                                                  use_doublesided_k=use_doublesided_k, dimension=dimension)
     num_k_bins = k_bins.size - 1 # I'm sure this is here for a reason but what is the reason?
-    assert np.isfinite(k_x).all()
-    assert np.isfinite(k_y).all()
+    for k_dim in k_arrays:
+        assert np.isfinite(k_dim).all()
 
-    min_process_size = (k_x.size * k_y.size * particles_at_frame[0, :, 0].size) + (k_x.size * k_y.size * particles_at_frame[0, :, 1].size)
+    k_shape = tuple(k_dim.size for k_dim in k_arrays)
+    k_size = np.prod(k_shape)
+    min_process_size = (k_size * particles_at_frame[0, :, 0].size) + (k_size * particles_at_frame[0, :, 1].size)
     min_process_ram = min_process_size*particles_at_frame.itemsize
 
     if not quiet: print(f'RAM to each process: {min_process_size*particles_at_frame.itemsize/1e9:.1f}GB')
@@ -238,9 +255,9 @@ def intermediate_scattering(
     # print(f'F size {common.arraysize(Fs)}')
     k   = np.full((num_k_bins), np.nan, dtype=np.float32)
 
-    F_full     = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
-    F_unc_full = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
-    k_full     = np.full((len(t), k_x.size, k_y.size), np.nan, dtype=np.float32)
+    F_full     = np.full((len(t), *k_shape), np.nan, dtype=np.float32)
+    F_unc_full = np.full((len(t), *k_shape), np.nan, dtype=np.float32)
+    k_full     = np.full((len(t), *k_shape), np.nan, dtype=np.float32)
 
     progress = progressbar(total=len(t)*min(num_timesteps-1, max_time_origins), smoothing=0.03, desc='computing', disable=quiet) # low smoothing makes it more like average speed and less like instantaneous speed
 
@@ -277,7 +294,7 @@ def intermediate_scattering(
         F_, F_unc_, k_, F_unbinned, F_unc_unbinned, k_unbinned = intermediate_scattering_for_dframe(F_type=F_type,
                             max_time_origins=max_time_origins, t=t, particles_at_frame=particles_at_frame,
                             pairs=pairs_at_t[t_i],
-                            k_x=k_x, k_y=k_y, k_bins=k_bins, pool=pool, progress=progress, window_func=window_func)
+                            k_arrays=k_arrays, k_bins=k_bins, pool=pool, progress=progress, window_func=window_func)
         
         F   [t_i, :] = F_
         F_unc[t_i, :] = F_unc_
@@ -294,10 +311,10 @@ def intermediate_scattering(
 
     assert np.any(F > 0.001)
 
-    Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_x', 'k_y', 'd_frames'])
-    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_x=k_x, k_y=k_y, d_frames=t)
+    Results = collections.namedtuple('Results', ['F', 'F_unc', 'k', 'F_full', 'F_unc_full', 'k_full', 'k_arrays', 'd_frames'])
+    return Results(F=F, F_unc=F_unc, k=k, F_full=F_full, F_unc_full=F_unc_full, k_full=k_full, k_arrays=k_arrays, d_frames=t)
 
-def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at_frame, k_x, k_y, k_bins, pool, progress, window_func, pairs):
+def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at_frame, k_arrays, k_bins, pool, progress, window_func, pairs):
     assert particles_at_frame.dtype == np.float32
 
     use_every_nth_pair = int(np.ceil(pairs.shape[0] / max_time_origins))
@@ -310,10 +327,12 @@ def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at
     num_used_time_origins = len(pairs_of_particles)
     mean_num_particles = np.count_nonzero(np.isfinite(particles_at_frame)) / particles_at_frame.shape[0] / 2 # div 2 for x and y
 
+    k_shape = tuple(k_dim.size for k_dim in k_arrays)
+
     F = np.full((num_used_time_origins, k_bins.size-1), np.nan, dtype=np.float32)
     k = np.full((k_bins.size-1),                        np.nan, dtype=np.float32) # +1 b/c we get the left and right of the final bin
-    F_full     = np.full((num_used_time_origins, k_x.size, k_y.size), np.nan, dtype=np.float32)
-    k_full     = np.full((k_x.size, k_y.size),                        np.nan, dtype=np.float32)
+    F_full     = np.full((num_used_time_origins, *k_shape), np.nan, dtype=np.float32)
+    k_full     = np.full(k_shape,                        np.nan, dtype=np.float32)
                     
     if F_type == 'F_s':
         func = self_intermediate_scattering_internal
@@ -322,7 +341,7 @@ def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at
         # func = intermediate_scattering_internal_incremental
 
     bound = functools.partial(intermediate_scattering_preprocess_run_postprocess,
-                                k_x, k_y, k_bins, func, window_func)
+                                k_arrays, k_bins, func, window_func)
 
     results = []
     if pool:
@@ -354,10 +373,10 @@ def intermediate_scattering_for_dframe(F_type, max_time_origins, t, particles_at
     return np.nanmean(F, axis=0), np.nanstd(F, axis=0)/np.sqrt(num_used_time_origins*mean_num_particles), k, np.nanmean(F_full, axis=0), np.nanstd(F_full, axis=0)/np.sqrt(num_used_time_origins), k_full
 
 
-def intermediate_scattering_preprocess_run_postprocess(k_x, k_y, k_bins, func, window_func, particles):
+def intermediate_scattering_preprocess_run_postprocess(k_arrays, k_bins, func, window_func, particles):
     # there can be nan in particles_t0/1 if we're calculating F b/c it's a numpy array padded with nan at the top
 
-    k_unbinned, F_unbinned = func(particles[0], particles[1], k_x, k_y, window_func)
+    k_unbinned, F_unbinned = func(particles[0], particles[1], k_arrays, window_func)
     # func is probably intermediate_scattering_internal
     
     assert np.isnan(F_unbinned).sum() <= 1, f'F was {np.isnan(F_unbinned).sum()/F_unbinned.size*100:.0f}% NaN'
@@ -475,10 +494,12 @@ def get_k_and_bins_for_intermediate_scattering(min_k, max_k, num_k_bins, use_dou
 
     assert k_x.dtype == np.float32, f'k_x.dtype = {k_x.dtype}'
     
+    print('you need to update as we now return a tuple of the k arrays')
+
     if dimension == 2:
-        return k_x, k_y, bin_edges
+        return (k_x, k_y), bin_edges
     elif dimension == 3:
-        return k_x, k_y, k_z, bin_edges
+        return (k_x, k_y, k_z), bin_edges
 
 def ks_to_pairs(k_xs, k_ys, k_zs=None):
     """
@@ -575,20 +596,23 @@ def blackman_harris_window(Lx, Ly, x, y):
 def no_window(x, y):
     return np.ones_like(x)
 
-def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, window_func):
+def intermediate_scattering_internal(particles_t0, particles_t1, k_arrays, window_func):
     """
     Calculate 1/N sum_mu sum_nu exp( i k . (r_mu(t1) - r_nu(t0)) )
     
     :param particles_t0: 2 * N array of x,y positions at time t0
     :param particles_t1: 2 * N array of x,y positions at time t1
-    :param k_x: 1D array of k values in the x direction
-    :param k_y: 1D array of k values in the y direction
+    :param k_arrays: tuple of 1D arrays of k values in each direction
     :param window_func: function that takes x and y coordinates and returns window weights
 
     :return: k, f: 2D array of k magnitudes, and corresponding F(k)
     """
+    dimension = particles_t0.shape[1]
+    assert len(k_arrays) == dimension
 
-    assert k_x.dtype == np.float32, f'k_x.dtype = {k_x.dtype}'
+    for k_array in k_arrays:
+        assert k_array.dtype == np.float32, f'k_array.dtype = {k_array.dtype}'
+
     assert particles_t0.dtype == np.float32, f'particles_t0.dtype = {particles_t0.dtype}'
     # Thorneywork et al 2018 eq (27))
     
@@ -603,35 +627,68 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, windo
     particle_t1_x = particles_t1[:, 0]
     particle_t1_y = particles_t1[:, 1]
 
+    # a hack here to compute in either 3d or 2d is that we always compute in 3d,
+    # but if we're doing 2d, we just set the z coordinates to 0
+
     # dimensions are
-    # mu x nu x kx x ky
-    x_mu = particle_t0_x[:, np.newaxis, np.newaxis, np.newaxis]
-    y_mu = particle_t0_y[:, np.newaxis, np.newaxis, np.newaxis]
-    x_nu = particle_t1_x[np.newaxis, :, np.newaxis, np.newaxis]
-    y_nu = particle_t1_y[np.newaxis, :, np.newaxis, np.newaxis]
+    # mu x nu x kx x ky x kz
+    x_mu = particles_t0[:, 0][:, np.newaxis, np.newaxis, np.newaxis, np.newaxis]
+    y_mu = particles_t0[:, 1][:, np.newaxis, np.newaxis, np.newaxis, np.newaxis]
+    x_nu = particles_t1[:, 0][np.newaxis, :, np.newaxis, np.newaxis, np.newaxis]
+    y_nu = particles_t1[:, 1][np.newaxis, :, np.newaxis, np.newaxis, np.newaxis]
+    if dimension == 3:
+        z_mu = particles_t0[:, 2][:, np.newaxis, np.newaxis, np.newaxis, np.newaxis]
+        z_nu = particles_t1[:, 2][np.newaxis, :, np.newaxis, np.newaxis, np.newaxis]
+    else:
+        z_mu = np.zeros_like(particles_t0[:, 0])[:, np.newaxis, np.newaxis, np.newaxis, np.newaxis]
+        z_nu = np.zeros_like(particles_t1[:, 0])[np.newaxis, :, np.newaxis, np.newaxis, np.newaxis]
     # print('x dtype', x_mu.dtype)
 
-    k_x_ = k_x[:, np.newaxis]
-    k_y_ = k_y[np.newaxis, :]
-    k = np.sqrt(k_x_**2 + k_y_**2)
+    k_x = k_arrays[0]
+    k_y = k_arrays[1]
+
+    k_x_ = k_x[:, np.newaxis, np.newaxis]
+    k_y_ = k_y[np.newaxis, :, np.newaxis]
+    if dimension == 3: 
+        k_z = k_arrays[2]
+        k_z_ = k_z[np.newaxis, np.newaxis, :]
+    else:
+        k_z = np.array([0], dtype=np.float32)
+        k_z_ = np.zeros((1, 1, 1), dtype=np.float32)
+
+    k = np.sqrt(k_x_**2 + k_y_**2 + k_z_**2)
 
     # we gonna set the k=(0, 0) point to nan later, for now we save where it is
     assert np.sum(k_x == 0) == 1, f'np.sum(k_x == 0) = {np.sum(k_x == 0)}'
     assert np.sum(k_y == 0) == 1, f'np.sum(k_y == 0) = {np.sum(k_y == 0)}'
+    assert np.sum(k_z == 0) == 1, f'np.sum(k_z == 0) = {np.sum(k_z == 0)}'
     x_zero_index = np.argmax(k_x == 0)
     y_zero_index = np.argmax(k_y == 0)
+    z_zero_index = np.argmax(k_z == 0)
+    if dimension == 2:
+        assert z_zero_index == 0, f'z_zero_index = {z_zero_index}, but should be 0 for 2D'
     assert k_x[x_zero_index] == 0
     assert k_y[y_zero_index] == 0
+    assert k_z[z_zero_index] == 0
+    k_x = k_x[np.newaxis, np.newaxis, :, np.newaxis, np.newaxis]
+    k_y = k_y[np.newaxis, np.newaxis, np.newaxis, :, np.newaxis]
+    k_z = k_z[np.newaxis, np.newaxis, np.newaxis, np.newaxis, :]
 
-    k_x = k_x[np.newaxis, np.newaxis, :, np.newaxis]
-    k_y = k_y[np.newaxis, np.newaxis, np.newaxis, :]
-
-    k_dot_r_mu = k_x * x_mu + k_y * y_mu # this used to by dtype=f64 but idk why
-    k_dot_r_nu = k_x * x_nu + k_y * y_nu
+    assert len(k_x.shape) == 5
+    assert len(k_y.shape) == 5
+    assert len(k_z.shape) == 5
+    assert len(x_mu.shape) == 5
+    assert len(y_mu.shape) == 5
+    assert len(z_mu.shape) == 5
+    assert len(x_nu.shape) == 5
+    assert len(y_nu.shape) == 5
+    assert len(z_nu.shape) == 5
+    k_dot_r_mu = k_x * x_mu + k_y * y_mu + k_z * z_mu # this used to by dtype=f64 but idk why
+    k_dot_r_nu = k_x * x_nu + k_y * y_nu + k_z * z_nu
 
     # set the k=(0, 0) point to nan
-    k_dot_r_mu[:, :, x_zero_index, y_zero_index] = np.nan
-    k_dot_r_nu[:, :, x_zero_index, y_zero_index] = np.nan
+    k_dot_r_mu[:, :, x_zero_index, y_zero_index, z_zero_index] = np.nan
+    k_dot_r_nu[:, :, x_zero_index, y_zero_index, z_zero_index] = np.nan
 
     mu_weights = window_func(x_mu, y_mu)
     nu_weights = window_func(x_nu, y_nu)
@@ -658,8 +715,14 @@ def intermediate_scattering_internal(particles_t0, particles_t1, k_x, k_y, windo
         f = 1/num_particles * ( cos_accum + sin_accum )
     # del cos_accum, sin_accum # probably unneeded
 
-    f = np.squeeze(f) # idk why by shape is currently (1, 132, 156)
-    assert np.isnan(f[x_zero_index, y_zero_index]), f'f[x_zero_index, y_zero_index] = {f[x_zero_index, y_zero_index]}'
+    f = np.squeeze(f) # idk why by shape is currently (1, 132, 156 [, 156])
+    k = np.squeeze(k)
+    # this also removes the k_z dimension for 2D, which is what we want
+
+    if dimension == 3:
+        assert np.isnan(f[x_zero_index, y_zero_index, z_zero_index]), f'f[x_zero_index, y_zero_index, z_zero_index] = {f[x_zero_index, y_zero_index, z_zero_index]}'
+    elif dimension == 2:
+        assert np.isnan(f[x_zero_index, y_zero_index]), f'f[x_zero_index, y_zero_index] = {f[x_zero_index, y_zero_index]}'
 
     assert np.isfinite(k).all()
 
