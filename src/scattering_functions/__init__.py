@@ -1,2 +1,2 @@
 from .scattering_functions import *
-from . import msd, theory
+from . import msd, theory, van_hove

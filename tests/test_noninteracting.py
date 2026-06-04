@@ -47,7 +47,7 @@ def noninteracting_particles():
 
     return particles
 
-def test_noninteracting(noninteracting_particles):
+def test_fkt_noninteracting(noninteracting_particles):
     # calculating f(k, t) for every single timestep is uneeded - at large lag times you might as well space them logarithmically
     t = np.unique(np.floor(np.logspace(np.log10(dt), np.log10(t_max/2))))
 
@@ -145,3 +145,14 @@ def test_k_space_symmetry(noninteracting_particles):
 
     # check the symetry
     assert np.allclose(results.F_full[:, :, :], results.F_full[:, ::-1, ::-1], equal_nan=True), f"F(kx, ky, t) is not symmetric with F(-kx, -ky, t) ({maxv})"
+
+def test_gr_noninteracting(noninteracting_particles):
+    g, r = scattering_functions.van_hove.g_of_r(noninteracting_particles, columns={
+        'x': 0,
+        'y': 1,
+        't': 2,
+    }, num_r_bins=20)
+
+    fig, ax = plt.subplots()
+    ax.scatter(r, g)
+    fig.savefig('tests/test_outputs/test_gr_noninteracting.png')
