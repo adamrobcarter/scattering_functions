@@ -111,7 +111,7 @@ def g_of_r(particles, columns, num_r_bins=20, num_time_origins=20, max_r=None):
     assert columns['y'] == 1
 
     if max_r is None:
-        max_r = min(particles[:, 0].max(), particles[:, 1].max()) / 2
+        max_r = min(particles[:, 0].max(), particles[:, 1].max()) / 10
 
     num_timesteps = int(particles[:, time_column].max()) + 1
     gs = np.full((num_timesteps, num_r_bins), np.nan)
@@ -143,4 +143,4 @@ def g_of_r(particles, columns, num_r_bins=20, num_time_origins=20, max_r=None):
         # ax.errorbar(r_bin_edges, np.nanmean(gs, axis=0), yerr=np.nanstd(gs, axis=0)/np.sqrt(n), marker='.', linestyle='none')
         # ax.semilogy()
 
-    return gs, r_bin_edges
+    return np.nanmean(gs, axis=0), r_bin_edges

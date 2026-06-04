@@ -219,8 +219,12 @@ def test_gr_noninteracting(noninteracting_particles_2d):
         'x': 0,
         'y': 1,
         't': 2,
-    }, num_r_bins=20)
+    }, num_r_bins=100, max_r=10)
 
     fig, ax = plt.subplots()
+    print(r.shape, g.shape)
     ax.scatter(r, g)
+    ax.set_ylim(0, 2)
+    print('rg', r, g)
     fig.savefig('tests/test_outputs/test_gr_noninteracting.png')
+    print('saved', 'tests/test_outputs/test_gr_noninteracting.png')

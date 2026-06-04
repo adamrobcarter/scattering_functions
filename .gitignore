@@ -6,5 +6,4 @@ build/
 src/scattering_functions/__pycache__/*
 example_heatmap.png
 tests/__pycache__/*
-tests/test_outputs/test_noninteracting.png
-tests/test_outputs/test_noninteracting_3d.png
+tests/test_outputs/*
