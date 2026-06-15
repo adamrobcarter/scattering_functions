@@ -36,7 +36,24 @@ def msd_fft1d(r):
     for m in range(N):
         Q = Q - D[m-1] - D[N-m]
         S1[m] = Q / (N-m)
-    return S1 - 2 * S2
+        
+    out = S1 - 2 * S2
+    assert np.all(out >= 0), f'msd_fft1d: negative MSD value of {out.min()} at lag {out.argmin()}'
+    return out
+
+@numba.njit(fastmath=True, parallel=True)
+def msd_real1d(r):
+    """
+    calculate the MSD, averaged over all time origins, of a 1d sequence of numbers
+    """
+    N = len(r)
+    msd = np.zeros(N)
+    for lag in numba.prange(N):
+        msd[lag] = ((r[:N-lag] - r[lag:])**2).mean()
+        
+    assert np.all(msd >= 0), f'msd_real1d: negative MSD value of {msd.min()} at lag {msd.argmin()}'
+    return msd
+
 
 @numba.njit(parallel=True, fastmath=True)
 def msd_matrix(matrix):
@@ -762,6 +779,7 @@ def calc_incremental_xyz(particles, num_dimensions):
     skipped = 0
 
     # calc_every = 10
+    print('disabled FFT computation due to problems, real-space computation is a lot slower')
 
     while start_index < particles.shape[0]-1:
         current_id = particles[start_index, id_column]
@@ -807,7 +825,8 @@ def calc_incremental_xyz(particles, num_dimensions):
                 # t1 = time.time()
                 MSDs = np.full((num_dimensions, data_this_particle.shape[0]), np.nan)
                 for dimension in range(num_dimensions):
-                    MSDs[dimension, :] = msd_fft1d(data_this_particle[:, dimension])
+                    # MSDs[dimension, :] = msd_fft1d(data_this_particle[:, dimension])
+                    MSDs[dimension, :] = msd_real1d(data_this_particle[:, dimension])
                 # MSD = MSDs.sum(axis=0)
                 assert not np.any(np.isnan(MSDs))
                 # t2 = time.time()
