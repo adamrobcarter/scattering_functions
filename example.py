@@ -89,11 +89,11 @@ ax_f.set_ylabel('$f(k, t)$')
 # f(k, t) = exp( -D k^t t )
 # we inverse this at t = t[1] to get D(k)
 D_meas = - np.log(f[1, :]) / ( k**2 * t[1])
-ax_D.scatter(k, D_meas, label=f'$D(k, {t[1]}\mathrm{{s}})$')
+ax_D.scatter(k, D_meas, label=fr'$D(k, {t[1]}\mathrm{{s}})$')
 # we could also do the inversion at a different time point
 time_index = 10
 D_meas = - np.log(f[time_index, :]) / ( k**2 * t[time_index])
-ax_D.scatter(k, D_meas, label=f'$D(k, {t[time_index]}\mathrm{{s}})$')
+ax_D.scatter(k, D_meas, label=fr'$D(k, {t[time_index]}\mathrm{{s}})$')
 
 ax_D.set_ylabel('$D$ (μm²/s)')
 ax_D.set_xlabel('$k$ (1/μm)')
@@ -125,8 +125,8 @@ results = scattering_functions.intermediate_scattering(
 # x = np.concatenate((-results.k_x[::-1], [0], results.k_x))
 # y = np.concatenate((-results.k_y[::-1], [0], results.k_y))
 
-x = results.k_x 
-y = results.k_y
+x = results.k_arrays[0]
+y = results.k_arrays[1]
 
 print(x.shape, y.shape, results.F_full.shape)
 ax_heatmap.pcolormesh(x, y, results.F_full[1, :, :], shading='nearest')
